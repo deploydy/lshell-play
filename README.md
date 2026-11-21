@@ -25,6 +25,7 @@ Simple configuration for swayFX
 | `Mod` + `d` | App Launcher | `rofi -show drun` |
 | `Mod` + `c` | Crypto Monitor | `kitty python3 $HOME/.config/cryptosee.py` |
 | `Mod` + `b` | Browser | `firefox` |
+| `Mod` + `p` | Browser | `swaync-client -t -sw` |
 | `Mod` + `n` | File Manager | `dolphin` |
 | `Mod` + `w` | Wallpaper Manager | `waypaper` |
 | `Mod` + `.` | Emoji Launcher | `rofi -show emoji` |
