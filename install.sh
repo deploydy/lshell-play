@@ -9,28 +9,26 @@ LOG="/tmp/lshell-installer.log"
 MANIFEST_DIR="$HOME/.local/share/lshell"
 MANIFEST="$MANIFEST_DIR/manifest"
 REPO_URL="https://github.com/deploydy/lshell-play"
+VERSION="1.1"
 T0=$SECONDS
 
 # ---------- palette (truecolor) ----------
 R=$'\033[0m'
 B=$'\033[1m'
 DIM=$'\033[2m'
-PURPLE=$'\033[38;2;167;139;250m'
-CYAN=$'\033[38;2;103;232;249m'
-PINK=$'\033[38;2;244;114;182m'
+CYAN=$'\033[38;2;0;229;255m'
+BLUE=$'\033[38;2;80;170;255m'
+PURPLE=$'\033[38;2;150;110;255m'
+PINK=$'\033[38;2;255;100;210m'
 GREEN=$'\033[38;2;134;239;172m'
 YELLOW=$'\033[38;2;253;224;71m'
 RED=$'\033[38;2;248;113;113m'
-BLUE=$'\033[38;2;125;180;255m'
-TEXT=$'\033[38;2;228;228;231m'
-GRAY=$'\033[38;2;130;130;145m'
-DARK=$'\033[38;2;63;63;80m'
-BG_SEL=$'\033[48;2;36;34;58m'
+TEXT=$'\033[38;2;228;228;236m'
+GRAY=$'\033[38;2;130;130;150m'
+DARK=$'\033[38;2;60;58;90m'
+BG_SEL=$'\033[48;2;34;30;66m'
 BG_GREEN=$'\033[48;2;134;239;172m\033[38;2;20;20;30m'
 BG_RED=$'\033[48;2;248;113;113m\033[38;2;20;20;30m'
-
-HR=""
-for ((i = 0; i < 50; i++)); do HR+="─"; done
 
 # ---------- cleanup ----------
 KEEPALIVE_PID=""
@@ -43,28 +41,126 @@ trap cleanup EXIT
 trap 'echo; exit 130' INT
 
 # ============================================================
+#  GRADIENT HELPERS   cyan -> violet -> pink
+# ============================================================
+
+GR=0; GG=0; GB=0
+# grad_rgb <pos> <max>  ->  sets GR GG GB
+grad_rgb() {
+    local t=$(( $1 * 1000 / $2 ))
+    if (( t <= 500 )); then
+        GR=$(( 0 + (150 - 0) * t / 500 ))
+        GG=$(( 229 + (110 - 229) * t / 500 ))
+        GB=255
+    else
+        t=$(( t - 500 ))
+        GR=$(( 150 + (255 - 150) * t / 500 ))
+        GG=$(( 110 + (100 - 110) * t / 500 ))
+        GB=$(( 255 + (210 - 255) * t / 500 ))
+    fi
+}
+
+# grad_line <char> <width>  ->  $LINE
+LINE=""
+grad_line() {
+    local ch="$1" w=$2 i
+    LINE=""
+    for ((i = 0; i < w; i++)); do
+        grad_rgb "$i" $(( w - 1 ))
+        LINE+=$'\033[38;2;'"$GR;$GG;${GB}m$ch"
+    done
+    LINE+="$R"
+}
+
+# ============================================================
+#  LOGO  (block letters, gradient + offset shadow)
+# ============================================================
+
+LOGO_W=0
+LOGO_H=6
+LOGO_CELLS=()
+
+build_logo() {
+    local -A G=(
+        [L]="X..X..X..X..XXX"
+        [S]="XXXX..XXX..XXXX"
+        [H]="X.XX.XXXXX.XX.X"
+        [E]="XXXX..XX.X..XXX"
+    )
+    local word="LSHELL" r k ch row x y cell
+    local -a mask=()
+
+    for ((r = 0; r < 5; r++)); do
+        row=""
+        for ((k = 0; k < ${#word}; k++)); do
+            ch="${word:k:1}"
+            row+="${G[$ch]:$((r * 3)):3}"
+            if (( k < ${#word} - 1 )); then row+="."; fi
+        done
+        mask+=("$row")
+    done
+
+    local units=${#mask[0]}
+    local lw=$(( units * 2 ))
+    LOGO_W=$(( lw + 2 ))
+    LOGO_CELLS=()
+
+    for ((y = 0; y < LOGO_H; y++)); do
+        for ((x = 0; x < LOGO_W; x++)); do
+            cell=" "
+            if (( y < 5 && x < lw )) && [ "${mask[$y]:$((x / 2)):1}" = "X" ]; then
+                grad_rgb "$x" $(( LOGO_W - 1 ))
+                printf -v cell '\033[38;2;%d;%d;%dm█' "$GR" "$GG" "$GB"
+            elif (( y >= 1 && x >= 2 && x - 2 < lw )) && [ "${mask[$((y - 1))]:$(( (x - 2) / 2 )):1}" = "X" ]; then
+                grad_rgb "$x" $(( LOGO_W - 1 ))
+                printf -v cell '\033[38;2;%d;%d;%dm░' $(( GR * 50 / 100 )) $(( GG * 50 / 100 )) $(( GB * 50 / 100 ))
+            fi
+            LOGO_CELLS+=("$cell")
+        done
+    done
+}
+
+print_logo() {
+    local w=$1 y x line
+    for ((y = 0; y < LOGO_H; y++)); do
+        line="   "
+        for ((x = 0; x < LOGO_W; x++)); do
+            if (( x < w )); then
+                line+="${LOGO_CELLS[$((y * LOGO_W + x))]}"
+            else
+                line+=" "
+            fi
+        done
+        printf '%s%s\n' "$line" "$R"
+    done
+}
+
+# ============================================================
 #  UI HELPERS
 # ============================================================
 
 banner() {
     clear
-    local rows=(
-"██╗     ███████╗██╗  ██╗███████╗██╗     ██╗     "
-"██║     ██╔════╝██║  ██║██╔════╝██║     ██║     "
-"██║     ███████╗███████║█████╗  ██║     ██║     "
-"██║     ╚════██║██╔══██║██╔══╝  ██║     ██║     "
-"███████╗███████║██║  ██║███████╗███████╗███████╗"
-"╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝"
-    )
-    local cols=("196;148;255" "170;152;255" "143;164;255" "116;184;255" "98;208;255" "103;232;249")
-    local i
+    if [ "$LOGO_W" -eq 0 ]; then build_logo; fi
     echo
-    for i in "${!rows[@]}"; do
-        printf '   \033[38;2;%sm%s%s\n' "${cols[$i]}" "${rows[$i]}" "$R"
-    done
+
+    if [ "${ANIM:-0}" = "1" ] && [ -t 1 ]; then
+        local w
+        for ((w = 2; w <= LOGO_W; w += 3)); do
+            print_logo "$w"
+            printf '\033[%dA' "$LOGO_H"
+            sleep 0.012
+        done
+    fi
+    print_logo "$LOGO_W"
+
+    echo
+    printf '   %*s%sLiquid Shell · installer · v%s%s\n' 8 '' "$GRAY" "$VERSION" "$R"
+    grad_line "─" "$LOGO_W"
+    printf '   %s\n' "$LINE"
     echo
     printf '   %s◆%s %sSway%s %s·%s %sWaybar%s %s·%s %sRofi%s %s·%s %sKitty%s\n' \
-        "$PURPLE" "$R" "$TEXT" "$R" "$DARK" "$R" "$TEXT" "$R" "$DARK" "$R" "$TEXT" "$R" "$DARK" "$R" "$TEXT" "$R"
+        "$PURPLE" "$R" "$CYAN" "$R" "$DARK" "$R" "$BLUE" "$R" "$DARK" "$R" "$PURPLE" "$R" "$DARK" "$R" "$PINK" "$R"
     printf '   %s%s%s\n' "$DIM$GRAY" "$REPO_URL" "$R"
     printf '   %sArch Linux · %s@%s%s\n' "$DIM$GRAY" "${USER:-user}" "${HOSTNAME:-host}" "$R"
     echo
@@ -83,15 +179,14 @@ rail_end()  { printf '   %s╰─%s\n' "$RAILC" "$R"; }
 
 # gradient progress bar -> $BAR
 BARW=20
+BAR=""
 gbar() {
-    local f=$1 i r g b
+    local f=$1 i
     BAR=""
     for ((i = 0; i < BARW; i++)); do
         if (( i < f )); then
-            r=$(( 167 + (103 - 167) * i / (BARW - 1) ))
-            g=$(( 139 + (232 - 139) * i / (BARW - 1) ))
-            b=$(( 250 + (249 - 250) * i / (BARW - 1) ))
-            BAR+=$'\033[38;2;'"$r;$g;${b}m━"
+            grad_rgb "$i" $(( BARW - 1 ))
+            BAR+=$'\033[38;2;'"$GR;$GG;${GB}m━"
         else
             BAR+="${DARK}─"
         fi
@@ -106,7 +201,7 @@ TOTAL=0
 run() {
     local msg="$1"; shift
     local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-    local i=0 t0=$SECONDS el pct
+    local i=0 t0=$SECONDS el pct p sc
     STEP=$((STEP + 1))
 
     echo "=== [$STEP/$TOTAL] $msg ===" >> "$LOG"
@@ -119,8 +214,11 @@ run() {
     tput civis 2>/dev/null || true
     while kill -0 "$pid" 2>/dev/null; do
         el=$((SECONDS - t0))
+        p=$(( i % 40 )); if [ "$p" -gt 20 ]; then p=$(( 40 - p )); fi
+        grad_rgb "$p" 20
+        sc=$'\033[38;2;'"$GR;$GG;${GB}m"
         printf '\r\033[K   %s%s%s %s%d/%d%s  %s%-34s%s %s %s%3d%%%s %s%3ds%s' \
-            "$PURPLE" "${frames[$((i % 10))]}" "$R" \
+            "$sc" "${frames[$((i % 10))]}" "$R" \
             "$GRAY" "$STEP" "$TOTAL" "$R" \
             "$TEXT" "$msg" "$R" \
             "$BAR" "$GRAY" "$pct" "$R" "$DIM$GRAY" "$el" "$R"
@@ -153,11 +251,12 @@ run() {
 summary() {
     local t=$((SECONDS - T0)) took
     took=$(printf '%dm %02ds' $((t / 60)) $((t % 60)))
+    grad_line "─" 50
     echo
-    printf '   %s╭%s╮%s\n' "$GREEN" "$HR" "$R"
-    printf '   %s│%s %s✔%s  %s%s%-46s%s%s│%s\n' "$GREEN" "$R" "$GREEN$B" "$R" "$B" "$TEXT" "$1" "$R" "$GREEN" "$R"
-    printf '   %s│%s    %s%-46s%s%s│%s\n' "$GREEN" "$R" "$GRAY" "Finished in $took" "$R" "$GREEN" "$R"
-    printf '   %s╰%s╯%s\n' "$GREEN" "$HR" "$R"
+    printf '   %s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
+    printf '   %s│%s %s✔%s  %s%s%-46s%s%s│%s\n' "$CYAN" "$R" "$GREEN$B" "$R" "$B" "$TEXT" "$1" "$R" "$PINK" "$R"
+    printf '   %s│%s    %s%-46s%s%s│%s\n' "$CYAN" "$R" "$GRAY" "Finished in $took" "$R" "$PINK" "$R"
+    printf '   %s╰%s%s╯%s\n' "$CYAN" "$LINE" "$PINK" "$R"
     echo
 }
 
@@ -467,7 +566,7 @@ do_uninstall() {
 #  MAIN
 # ============================================================
 
-banner
+ANIM=1 banner
 printf '   %s%sSelect an action%s   %s↑/↓ or 1-4 · Enter to confirm%s\n\n' "$B" "$TEXT" "$R" "$DIM$GRAY" "$R"
 menu
 
