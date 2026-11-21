@@ -66,4 +66,4 @@ chmod +x install.sh
 * **Storage:** 16 GB or more for comfortable system use
 
 # Once installed, do this
-Press Win + S and select the panel position and your city. Press Enter and select item Q, then reload the config - Win+Shift+C
+Press Win + S and select the panel position and your city(Press C). Press Enter and select item Q, then reload the config - Win+Shift+C
