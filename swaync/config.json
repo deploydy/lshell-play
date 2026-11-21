@@ -1,0 +1,92 @@
+{
+  "$schema": "/etc/xdg/swaync/configSchema.json",
+  "positionX": "right",
+  "positionY": "top",
+  "control-center-positionX": "right",
+  "control-center-positionY": "center",
+  "layer": "overlay",
+  "control-center-layer": "overlay",
+  "layer-shell": true,
+  "cssPriority": "user",
+  "control-center-margin-top": 8,
+  "control-center-margin-bottom": 8,
+  "control-center-margin-left": 0,
+  "control-center-margin-right": 8,
+  "control-center-width": 300,
+  "control-center-height": 470,
+  "fit-to-screen": false,
+  "notification-window-width": 300,
+  "notification-icon-size": 36,
+  "notification-body-image-height": 90,
+  "notification-body-image-width": 180,
+  "image-visibility": "when-available",
+  "timeout": 6,
+  "timeout-low": 4,
+  "timeout-critical": 0,
+  "transition-time": 200,
+  "keyboard-shortcuts": true,
+  "hide-on-clear": false,
+  "hide-on-action": true,
+  "script-fail-notify": true,
+  "widgets": [
+    "buttons-grid#row1",
+    "buttons-grid#row2",
+    "volume",
+    "mpris",
+    "title",
+    "notifications"
+  ],
+  "widget-config": {
+    "title": {
+      "text": "Notifications",
+      "clear-all-button": true,
+      "button-text": "Clear"
+    },
+    "volume": {
+      "label": "\uf028",
+      "show-per-app": false
+    },
+    "mpris": {
+      "image-size": 48,
+      "image-radius": 12,
+      "blur": false,
+      "autohide": true
+    },
+    "buttons-grid#row1": {
+      "actions": [
+        {
+          "label": "\uf1eb  Wi-Fi",
+          "type": "toggle",
+          "active": true,
+          "command": "bash -c '[[ $SWAYNC_TOGGLE_STATE == true ]] && nmcli radio wifi on || nmcli radio wifi off'",
+          "update_command": "bash -c '[[ $(nmcli radio wifi) == enabled ]] && echo true || echo false'"
+        },
+        {
+          "label": "\uf293  Bluetooth",
+          "type": "toggle",
+          "active": false,
+          "command": "bash -c '[[ $SWAYNC_TOGGLE_STATE == true ]] && bluetoothctl power on || bluetoothctl power off'",
+          "update_command": "bash -c 'bluetoothctl show | grep -q Powered:.yes && echo true || echo false'"
+        }
+      ]
+    },
+    "buttons-grid#row2": {
+      "actions": [
+        {
+          "label": "\uf186  Focus",
+          "type": "toggle",
+          "active": false,
+          "command": "swaync-client -d -sw",
+          "update_command": "swaync-client -D -sw"
+        },
+        {
+          "label": "\uf072  Airplane",
+          "type": "toggle",
+          "active": false,
+          "command": "bash -c '[[ $SWAYNC_TOGGLE_STATE == true ]] && rfkill block all || rfkill unblock all'",
+          "update_command": "bash -c 'rfkill list all | grep -q Soft.blocked:.no && echo false || echo true'"
+        }
+      ]
+    }
+  }
+}

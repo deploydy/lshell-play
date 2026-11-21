@@ -1,0 +1,166 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 24,
+  "spacing": 0,
+  "margin": "0",
+  "modules-left": [
+    "custom/apple",
+    "sway/workspaces",
+    "wlr/taskbar"
+  ],
+  "modules-center": [
+    "custom/media-prev",
+    "custom/media-toggle",
+    "mpris",
+    "custom/media-next"
+  ],
+  "modules-right": [
+    "group/pill",
+    "pulseaudio",
+    "battery",
+    "network",
+    "custom/search",
+    "custom/controlcenter",
+    "clock"
+  ],
+  "custom/apple": {
+    "format": " ",
+    "tooltip": false
+  },
+  "sway/workspaces": {
+    "format": "{name}",
+    "all-outputs": false,
+    "disable-scroll": false,
+    "persistent-workspaces": { "1": [], "2": [], "3": [], "4": [], "5": [] }
+  },
+  "wlr/taskbar": {
+    "format": "{name}",
+    "icon-size": 1,
+    "on-click": "activate",
+    "tooltip": false
+  },
+  "custom/media-prev": {
+    "format": "<span rise='900'>\uf048</span>",
+    "exec": "playerctl status >/dev/null 2>&1 && echo x",
+    "interval": 2,
+    "tooltip": false,
+    "on-click": "playerctl previous"
+  },
+  "custom/media-toggle": {
+    "format": "<span rise='900'>{icon}</span>",
+    "format-icons": { "playing": "\uf04c", "paused": "\uf04b" },
+    "return-type": "json",
+    "exec": "playerctl status 2>/dev/null | sed -n 's/^Playing$/{\"alt\":\"playing\"}/p;s/^Paused$/{\"alt\":\"paused\"}/p'",
+    "interval": 1,
+    "signal": 8,
+    "tooltip": false,
+    "on-click": "playerctl play-pause; pkill -RTMIN+8 waybar"
+  },
+  "custom/media-next": {
+    "format": "<span rise='900'>\uf051</span>",
+    "exec": "playerctl status >/dev/null 2>&1 && echo x",
+    "interval": 2,
+    "tooltip": false,
+    "on-click": "playerctl next"
+  },
+  "mpris": {
+    "format": "{dynamic}",
+    "format-stopped": "",
+    "dynamic-order": ["artist", "title"],
+    "min-length": 22,
+    "max-length": 42,
+    "align": 0.5,
+    "ellipsis": "…",
+    "tooltip-format": "{player}: {artist} — {title}\n{album}",
+    "on-click": "play-pause",
+    "on-click-right": "next",
+    "on-click-middle": "previous"
+  },
+  "group/pill": {
+    "orientation": "inherit",
+    "modules": ["group/tray-drawer", "sway/language"]
+  },
+  "group/tray-drawer": {
+    "orientation": "inherit",
+    "drawer": {
+      "transition-duration": 250,
+      "transition-left-to-right": false,
+      "click-to-reveal": false
+    },
+    "modules": ["custom/chevron", "custom/logout", "tray"]
+  },
+  "custom/logout": {
+    "format": "<span rise='900'>\uf2f5</span>",
+    "tooltip": false,
+    "on-click": "wlogout"
+  },
+  "tray": {
+    "icon-size": 14,
+    "spacing": 10
+  },
+  "custom/chevron": {
+    "format": "<span rise='900'>\uf104</span>",
+    "tooltip": false,
+    "on-click": "wlogout"
+  },
+  "sway/language": {
+    "format": "<span rise='900'>{short}</span>",
+    "tooltip": false,
+    "on-click": "swaymsg input type:keyboard xkb_switch_layout next"
+  },
+  "pulseaudio": {
+    "format": "<span rise='900'>{icon}</span>  {volume}%",
+    "format-muted": "<span rise='900'>\uf6a9</span>  0%",
+    "format-icons": { "default": ["\uf026", "\uf027", "\uf028"] },
+    "tooltip-format": "{desc}",
+    "scroll-step": 5,
+    "on-click": "pavucontrol",
+    "on-click-right": "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+  },
+  "battery": {
+    "states": { "warning": 20, "critical": 10 },
+    "format": "<span rise='900'>{icon}</span>  {capacity}%",
+    "format-charging": "<span rise='900'>\uf0e7</span>  {capacity}%",
+    "format-plugged": "<span rise='900'>\uf1e6</span>  {capacity}%",
+    "format-icons": ["\uf244", "\uf243", "\uf242", "\uf241", "\uf240"],
+    "tooltip-format": "{timeTo}"
+  },
+  "network": {
+    "format-wifi": "<span rise='900'>\uf1eb</span>",
+    "format-ethernet": "<span rise='900'>\uf0e8</span>",
+    "format-disconnected": "<span rise='900'>\uf1eb</span>",
+    "tooltip-format-wifi": "{essid} ({signalStrength}%)",
+    "tooltip-format-ethernet": "{ifname}",
+    "tooltip-format-disconnected": "Wi-Fi выключен",
+    "on-click": "nm-connection-editor"
+  },
+  "custom/search": {
+    "format": "<span rise='900'>\uf002</span>",
+    "tooltip": false,
+    "on-click": "rofi -show drun"
+  },
+  "custom/controlcenter": {
+    "format": "<span rise='900'>\uf1de</span>",
+    "tooltip": false,
+    "on-click": "swaync-client -t -sw"
+  },
+  "clock": {
+    "timezones": [
+      "Asia/Tokyo",
+      "Europe/Kyiv",
+      "Europe/London",
+      "America/New_York",
+      "America/Los_Angeles",
+      "Asia/Dubai"
+    ],
+    "format": "{:%a %-d %b  %H:%M %Z}",
+    "tooltip-format": "{tz_list}\n<tt>{calendar}</tt>",
+    "actions": {
+      "on-click": "tz_up",
+      "on-click-right": "tz_down",
+      "on-scroll-up": "tz_up",
+      "on-scroll-down": "tz_down"
+    }
+  }
+}

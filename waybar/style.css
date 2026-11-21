@@ -1,0 +1,367 @@
+@define-color fg #ffffff;
+@define-color fg-dim rgba(255, 255, 255, 0.55);
+@define-color hover rgba(255, 255, 255, 0.18);
+@define-color hover-border rgba(255, 255, 255, 0.26);
+
+* {
+  font-family: "SF Pro Text", "SF Pro Display", "Inter", "Noto Sans", "Font Awesome 6 Free", "Symbols Nerd Font", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 0;
+  min-height: 0;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+window#waybar {
+  background-color: rgba(0, 0, 0, 0.01);
+  color: @fg;
+}
+
+tooltip {
+  background-color: rgba(30, 30, 32, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: @fg;
+}
+tooltip label {
+  color: @fg;
+}
+
+#custom-apple,
+#custom-chevron,
+#custom-logout,
+#language,
+#tray,
+#pulseaudio,
+#battery,
+#network,
+#custom-search,
+#custom-controlcenter,
+#clock {
+  padding: 0 8px;
+  margin: 2px 1px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background-color: transparent;
+  color: @fg;
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, font-size 200ms ease-in-out;
+}
+
+#network,
+#custom-search,
+#custom-controlcenter {
+  padding-bottom: 2px;
+}
+
+#custom-apple:hover,
+#custom-chevron:hover,
+#custom-logout:hover,
+#language:hover,
+#pulseaudio:hover,
+#battery:hover,
+#network:hover,
+#custom-search:hover,
+#custom-controlcenter:hover,
+#clock:hover {
+  background-color: @hover;
+  border: 1px solid @hover-border;
+}
+
+#custom-apple {
+  min-width: 14px;
+  padding: 0 10px;
+  background-image: url("apple-white.svg");
+  background-repeat: no-repeat;
+  background-position: center 1px;
+  background-size: 11px 13px;
+  text-shadow: none;
+  transition: background-color 200ms ease, border-color 200ms ease,
+              background-size 200ms ease-in-out, background-position 200ms ease-in-out;
+}
+#custom-apple:hover {
+  background-size: 12px 14px;
+  background-position: center 0px;
+}
+
+#workspaces {
+  margin: 0 2px;
+}
+#workspaces button {
+  min-width: 0;
+  padding: 0 7px;
+  margin: 2px 1px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background-color: transparent;
+  background-image: none;
+  color: @fg-dim;
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, font-size 200ms ease-in-out;
+}
+#workspaces button:hover {
+  background-color: @hover;
+  background-image: none;
+  color: @fg;
+}
+#workspaces button.active,
+#workspaces button.focused {
+  background-color: @hover;
+  border: 1px solid @hover-border;
+  color: @fg;
+}
+#workspaces button.urgent {
+  color: #ff453a;
+}
+
+#custom-media-prev,
+#custom-media-toggle,
+#mpris,
+#custom-media-next {
+  margin: 3px 0;
+  padding: 0 10px;
+  border: 1px solid @hover-border;
+  border-radius: 0;
+  background-color: @hover;
+  color: @fg;
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, font-size 200ms ease-in-out;
+}
+#custom-media-prev {
+  padding: 0 8px 0 14px;
+  border-radius: 12px 0 0 12px;
+}
+#custom-media-toggle,
+#mpris,
+#custom-media-next {
+  border-left: none;
+}
+#custom-media-toggle {
+  min-width: 14px;
+  padding: 0 8px;
+}
+#mpris {
+  padding: 0 8px;
+}
+#custom-media-next {
+  padding: 0 14px 0 8px;
+  border-radius: 0 12px 12px 0;
+}
+#custom-media-prev:hover,
+#custom-media-toggle:hover,
+#mpris:hover,
+#custom-media-next:hover {
+  background-color: rgba(255, 255, 255, 0.26);
+}
+#mpris.paused {
+  color: @fg-dim;
+}
+
+#taskbar {
+  margin: 0;
+  padding: 0;
+}
+#taskbar button,
+#taskbar button label {
+  font-size: 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  text-shadow: none;
+}
+#taskbar button image {
+  opacity: 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+#taskbar button.active {
+  margin: 2px 1px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, font-size 200ms ease-in-out;
+}
+#taskbar button.active label {
+  font-size: 13px;
+  font-weight: 800;
+  color: @fg;
+  transition: font-size 200ms ease-in-out, color 200ms ease;
+  text-shadow: none;
+}
+#taskbar button.active:hover {
+  background-color: @hover;
+  border: 1px solid @hover-border;
+}
+
+#custom-chevron {
+  font-size: 15px;
+  padding: 0 7px;
+}
+
+#tray > .passive {
+  -gtk-icon-effect: dim;
+}
+#tray > .needs-attention {
+  -gtk-icon-effect: highlight;
+}
+
+#network.disconnected,
+#pulseaudio.muted {
+  color: @fg-dim;
+}
+
+#battery.warning:not(.charging)  { color: #ffd60a; }
+#battery.critical:not(.charging) { color: #ff453a; }
+#battery.charging                { color: #30d158; }
+
+#clock {
+  padding: 0 11px 0 8px;
+}
+
+#custom-apple:active,
+#custom-chevron:active,
+#custom-logout:active,
+#language:active,
+#pulseaudio:active,
+#battery:active,
+#network:active,
+#custom-search:active,
+#custom-controlcenter:active,
+#clock:active,
+#workspaces button:active,
+#taskbar button.active:active {
+  background-color: rgba(255, 255, 255, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.40);
+}
+#custom-media-prev:active,
+#custom-media-toggle:active,
+#mpris:active,
+#custom-media-next:active {
+  background-color: rgba(255, 255, 255, 0.36);
+}
+
+@keyframes pulse-green {
+  from { color: #30d158; }
+  to   { color: #a8ffc0; }
+}
+@keyframes pulse-yellow {
+  from { color: #ffd60a; }
+  to   { color: #fff3a0; }
+}
+@keyframes blink-red {
+  from { color: #ff453a; background-color: transparent; }
+  to   { color: #ffffff; background-color: rgba(255, 69, 58, 0.55); }
+}
+@keyframes breathe {
+  from { color: @fg; }
+  to   { color: @fg-dim; }
+}
+
+#battery.charging {
+  animation-name: pulse-green;
+  animation-duration: 1.6s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+#battery.warning:not(.charging) {
+  animation-name: pulse-yellow;
+  animation-duration: 1.2s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+#battery.critical:not(.charging) {
+  animation-name: blink-red;
+  animation-duration: 0.7s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+#workspaces button.urgent {
+  animation-name: blink-red;
+  animation-duration: 0.7s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+#network.disconnected {
+  animation-name: breathe;
+  animation-duration: 1.4s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+#mpris.playing {
+  animation-name: breathe;
+  animation-duration: 2.4s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+#custom-logout:hover,
+#language:hover,
+#pulseaudio:hover,
+#battery:hover,
+#network:hover,
+#custom-search:hover,
+#custom-controlcenter:hover,
+#clock:hover,
+#workspaces button:hover,
+#custom-media-prev:hover,
+#custom-media-toggle:hover,
+#mpris:hover,
+#custom-media-next:hover {
+  font-size: 14px;
+}
+#custom-chevron:hover {
+  font-size: 16px;
+}
+#taskbar button.active:hover label {
+  font-size: 14px;
+}
+
+#pill {
+  margin: 2px 4px;
+  padding: 0 4px;
+  border: 1px solid @hover-border;
+  border-radius: 12px;
+  background-color: @hover;
+}
+#pill #custom-chevron,
+#pill #custom-logout,
+#pill #language,
+#pill #tray {
+  margin: 0;
+  padding: 0 6px;
+  border: none;
+  border-radius: 8px;
+  background-color: transparent;
+}
+#pill #custom-chevron:hover,
+#pill #custom-logout:hover,
+#pill #language:hover {
+  border: none;
+  background-color: rgba(255, 255, 255, 0.22);
+  font-size: 13px;
+}
+#pill #custom-chevron:hover {
+  font-size: 15px;
+}
+#pill #custom-chevron:active,
+#pill #custom-logout:active,
+#pill #language:active {
+  border: none;
+  background-color: rgba(255, 255, 255, 0.36);
+}
