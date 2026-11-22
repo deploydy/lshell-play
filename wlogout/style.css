@@ -1,0 +1,86 @@
+* {
+    background-image: none;
+    box-shadow: none;
+    transition: none;
+    animation: none;
+    font-family: "SF Pro Display", "Inter", "Noto Sans", sans-serif;
+}
+
+window {
+    background-color: rgba(12, 12, 16, 0.45);
+}
+
+button {
+    color: rgba(255, 255, 255, 0.85);
+    background-color: rgba(255, 255, 255, 0.10);
+    background-repeat: no-repeat;
+    background-position: center 38%;
+    background-size: 28%;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 32px;
+    margin: 22px;
+    padding-top: 150px;
+    font-size: 17px;
+    font-weight: 500;
+    outline-style: none;
+}
+
+button:active {
+    background-color: rgba(255, 255, 255, 0.30);
+}
+
+button#lock {
+    background-image: image(url("icons/lock.svg"));
+}
+
+button#lock:hover,
+button#lock:focus {
+    background-color: rgba(10, 132, 255, 0.50);
+    border: 1px solid rgba(255, 255, 255, 0.40);
+    color: white;
+}
+
+button#logout {
+    background-image: image(url("icons/logout.svg"));
+}
+
+button#logout:hover,
+button#logout:focus {
+    background-color: rgba(255, 159, 10, 0.50);
+    border: 1px solid rgba(255, 255, 255, 0.40);
+    color: white;
+}
+
+button#suspend {
+    background-image: image(url("icons/suspend.svg"));
+}
+
+button#suspend:hover,
+button#suspend:focus {
+    background-color: rgba(94, 92, 230, 0.50);
+    border: 1px solid rgba(255, 255, 255, 0.40);
+    color: white;
+}
+
+button#reboot {
+    background-image: image(url("icons/reboot.svg"));
+}
+
+button#reboot:hover,
+button#reboot:focus {
+    background-color: rgba(48, 209, 88, 0.50);
+    border: 1px solid rgba(255, 255, 255, 0.40);
+    color: white;
+}
+
+button#shutdown {
+    background-image: image(url("icons/shutdown.svg"));
+}
+
+button#shutdown:hover,
+button#shutdown:focus {
+    background-color: rgba(255, 69, 58, 0.50);
+    border: 1px solid rgba(255, 255, 255, 0.40);
+    color: white;
+}
+
