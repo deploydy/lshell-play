@@ -171,3 +171,5 @@ shadows disable
 layer_effects "rofi" blur enable; blur_ignore_transparent enable; corner_radius 17; shadows disable
 layer_effects "swaync-control-center" blur enable; blur_ignore_transparent enable; corner_radius 22; shadows disable
 layer_effects "swaync-notification-window" blur enable; blur_ignore_transparent enable; corner_radius 16; shadows disable
+
+for_window [app_id="python_popup"] floating enable, resize set 800 500, move position center
