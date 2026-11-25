@@ -133,7 +133,7 @@
     "tooltip-format-wifi": "{essid} ({signalStrength}%)",
     "tooltip-format-ethernet": "{ifname}",
     "tooltip-format-disconnected": "Wi-Fi выключен",
-    "on-click": "kitty nmtui"
+    on-click": "kitty --class='python_popup' python3 ~/.config/wifi.py"
   },
   "custom/search": {
     "format": "<span rise='900'>\uf002</span>",
