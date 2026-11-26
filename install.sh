@@ -2,14 +2,14 @@
 set -Eeuo pipefail
 
 # ============================================================
-#  LSHELL INSTALLER  (3D edition)
+#  LSHELL INSTALLER  (3D edition · v1.3)
 # ============================================================
 
 LOG="/tmp/lshell-installer.log"
 MANIFEST_DIR="$HOME/.local/share/lshell"
 MANIFEST="$MANIFEST_DIR/manifest"
 REPO_URL="https://github.com/deploydy/lshell-play"
-VERSION="1.2"
+VERSION="1.3"
 T0=$SECONDS
 
 # ---------- palette (truecolor) ----------
@@ -74,14 +74,18 @@ grad_line() {
 }
 
 # ============================================================
-#  3D LOGO  (extruded block letters: lit top edge, shaded
-#            bottom edge, diagonal depth with fading layers)
+#  3D LOGO
+#  extruded block letters · lit top edge · shaded bottom edge
+#  fading depth layers · light sweep (shimmer) · floor reflection
 # ============================================================
 
 LOGO_DEPTH=3
 LOGO_W=0
 LOGO_H=0
+LOGO_LW=0
 LOGO_CELLS=()
+LOGO_MASK=()
+LCR=(); LCG=(); LCB=()
 
 build_logo() {
     local -A G=(
@@ -102,16 +106,18 @@ build_logo() {
         done
         mask+=("$row")
     done
+    LOGO_MASK=("${mask[@]}")
 
     local units=${#mask[0]}
     local lw=$(( units * 2 ))
+    LOGO_LW=$lw
     LOGO_H=$(( 5 + LOGO_DEPTH ))
     LOGO_W=$(( lw + 2 * LOGO_DEPTH ))
-    LOGO_CELLS=()
+    LOGO_CELLS=(); LCR=(); LCG=(); LCB=()
 
     for ((y = 0; y < LOGO_H; y++)); do
         for ((x = 0; x < LOGO_W; x++)); do
-            cell=" "
+            cell=" "; cr=-1; cg=-1; cb=-1
             if (( y < 5 && x < lw )) && [ "${mask[$y]:$((x / 2)):1}" = "X" ]; then
                 # ---- front face ----
                 grad_rgb "$x" $(( LOGO_W - 1 ))
@@ -137,24 +143,63 @@ build_logo() {
                        && [ "${mask[$sy]:$((sx / 2)):1}" = "X" ]; then
                         grad_rgb "$x" $(( LOGO_W - 1 ))
                         pct=$(( 62 - (d - 1) * 17 ))
-                        printf -v cell '\033[38;2;%d;%d;%dm█' \
-                            $(( GR * pct / 100 )) $(( GG * pct / 100 )) $(( GB * pct / 100 ))
+                        cr=$(( GR * pct / 100 ))
+                        cg=$(( GG * pct / 100 ))
+                        cb=$(( GB * pct / 100 ))
+                        printf -v cell '\033[38;2;%d;%d;%dm█' "$cr" "$cg" "$cb"
                         break
                     fi
                 done
             fi
             LOGO_CELLS+=("$cell")
+            LCR+=("$cr"); LCG+=("$cg"); LCB+=("$cb")
         done
     done
 }
 
+# print_logo <revealed-width> [sweep-position]
+# cells inside the sweep band are lit up on the fly, the rest are cached
 print_logo() {
-    local w=$1 y x line
+    local w=$1 s=${2:--100} y x line idx d t cr cg cb cell
     for ((y = 0; y < LOGO_H; y++)); do
         line="   "
         for ((x = 0; x < LOGO_W; x++)); do
-            if (( x < w )); then
-                line+="${LOGO_CELLS[$((y * LOGO_W + x))]}"
+            if (( x >= w )); then
+                line+=" "
+                continue
+            fi
+            idx=$(( y * LOGO_W + x ))
+            d=$(( x + 2 * y - s ))
+            if (( d < 0 )); then d=$(( -d )); fi
+            if (( d < 8 && LCR[idx] >= 0 )); then
+                t=$(( (8 - d) * 55 / 8 ))
+                cr=$(( LCR[idx] + (255 - LCR[idx]) * t / 100 ))
+                cg=$(( LCG[idx] + (255 - LCG[idx]) * t / 100 ))
+                cb=$(( LCB[idx] + (255 - LCB[idx]) * t / 100 ))
+                printf -v cell '\033[38;2;%d;%d;%dm█' "$cr" "$cg" "$cb"
+                line+="$cell"
+            else
+                line+="${LOGO_CELLS[$idx]}"
+            fi
+        done
+        printf '%s%s\n' "$line" "$R"
+    done
+}
+
+# soft floor reflection of the front face, fading out
+print_reflection() {
+    local k y x line cell
+    local -a fac=(46 30 18)
+    local -a chr=("▒" "▒" "░")
+    for ((k = 0; k < 3; k++)); do
+        y=$(( 4 - k ))
+        line="   "
+        for ((x = 0; x < LOGO_W; x++)); do
+            if (( x < LOGO_LW )) && [ "${LOGO_MASK[$y]:$((x / 2)):1}" = "X" ]; then
+                grad_rgb "$x" $(( LOGO_W - 1 ))
+                printf -v cell '\033[38;2;%d;%d;%dm%s' \
+                    $(( GR * fac[k] / 100 )) $(( GG * fac[k] / 100 )) $(( GB * fac[k] / 100 )) "${chr[$k]}"
+                line+="$cell"
             else
                 line+=" "
             fi
@@ -173,18 +218,28 @@ banner() {
     echo
 
     if [ "${ANIM:-0}" = "1" ] && [ -t 1 ]; then
-        local w
+        local w s
+        # reveal left -> right
         for ((w = 2; w <= LOGO_W; w += 3)); do
             print_logo "$w"
             printf '\033[%dA' "$LOGO_H"
             sleep 0.012
         done
+        # light sweep, top-left -> bottom-right
+        for ((s = -6; s <= LOGO_W + 2 * LOGO_H + 6; s += 3)); do
+            print_logo "$LOGO_W" "$s"
+            printf '\033[%dA' "$LOGO_H"
+            sleep 0.008
+        done
     fi
     print_logo "$LOGO_W"
+    print_reflection
 
-    echo
-    printf '   %*s%sLiquid Shell · installer · v%s%s\n' 8 '' "$GRAY" "$VERSION" "$R"
-    grad_line "▀" "$LOGO_W"
+    local sub="Liquid Shell · installer · v$VERSION"
+    local pad=$(( (LOGO_W - ${#sub}) / 2 ))
+    if (( pad < 0 )); then pad=0; fi
+    printf '   %*s%s%s%s\n' "$pad" '' "$GRAY" "$sub" "$R"
+    grad_line "━" "$LOGO_W"
     printf '   %s\n' "$LINE"
     echo
     printf '   %s◆%s %sSway%s %s·%s %sWaybar%s %s·%s %sRofi%s %s·%s %sKitty%s\n' \
@@ -205,16 +260,22 @@ rail_top()  { RAILC="${2:-$PURPLE}"; printf '\n   %s╭─%s %s%s%s%s\n' "$RAILC
 rail()      { printf '   %s│%s  %s\n' "$RAILC" "$R" "$1"; }
 rail_end()  { printf '   %s╰─%s\n' "$RAILC" "$R"; }
 
-# 3D gradient progress bar -> $BAR   (solid fill, recessed track)
-BARW=20
+# smooth gradient progress bar -> $BAR
+# gbar <units>   (BARW * 8 units = 100%, 1/8-cell resolution)
+BARW=24
 BAR=""
 gbar() {
-    local f=$1 i
+    local u=$1 full rem i
+    local -a part=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
+    full=$(( u / 8 )); rem=$(( u % 8 ))
     BAR=""
     for ((i = 0; i < BARW; i++)); do
-        if (( i < f )); then
+        if (( i < full )); then
             grad_rgb "$i" $(( BARW - 1 ))
             BAR+=$'\033[38;2;'"$GR;$GG;${GB}m█"
+        elif (( i == full && rem > 0 )); then
+            grad_rgb "$i" $(( BARW - 1 ))
+            BAR+=$'\033[38;2;'"$GR;$GG;${GB}m${part[$rem]}"
         else
             BAR+="${SHADOW}░"
         fi
@@ -226,22 +287,24 @@ STEP=0
 TOTAL=0
 
 # run "message" command args...
+# the bar creeps forward while a step is running, then snaps to the step end
 run() {
     local msg="$1"; shift
     local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-    local i=0 t0=$SECONDS el pct p sc
+    local i=0 t0=$SECONDS el pct p sc ease units
     STEP=$((STEP + 1))
 
     echo "=== [$STEP/$TOTAL] $msg ===" >> "$LOG"
     "$@" >> "$LOG" 2>&1 < /dev/null &
     local pid=$!
 
-    gbar $(( (STEP - 1) * BARW / TOTAL ))
-    pct=$(( (STEP - 1) * 100 / TOTAL ))
-
     tput civis 2>/dev/null || true
     while kill -0 "$pid" 2>/dev/null; do
         el=$((SECONDS - t0))
+        ease=$(( 1000 * i / (i + 120) ))
+        units=$(( ((STEP - 1) * 1000 + ease) * BARW * 8 / (TOTAL * 1000) ))
+        pct=$(( ((STEP - 1) * 1000 + ease) * 100 / (TOTAL * 1000) ))
+        gbar "$units"
         p=$(( i % 40 )); if [ "$p" -gt 20 ]; then p=$(( 40 - p )); fi
         grad_rgb "$p" 20
         sc=$'\033[38;2;'"$GR;$GG;${GB}m"
@@ -261,7 +324,7 @@ run() {
     printf '\r\033[K'
 
     if (( rc == 0 )); then
-        gbar $(( STEP * BARW / TOTAL ))
+        gbar $(( STEP * BARW * 8 / TOTAL ))
         printf '   %s✔%s %s%d/%d%s  %s%-34s%s %s %s%3d%%%s %s%3ds%s\n' \
             "$GREEN" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" \
             "$TEXT" "$msg" "$R" \
@@ -292,14 +355,15 @@ summary() {
 }
 
 # confirm "question" [default: 0=yes 1=no] [lead]   ->  return 0 for yes
+# pill-style buttons: the active one is filled with rounded caps
 confirm() {
     local q="$1" sel="${2:-1}" lead="${3:-◆}" key k2 yes no
     tput civis 2>/dev/null || true
     while true; do
         if [ "$sel" -eq 0 ]; then
-            yes="${BG_GREEN}${B} Yes ${R}${SHADOW}▌${R}"; no="${GRAY} No ${R}"
+            yes="${GREEN}▐${BG_GREEN}${B} Yes ${R}${GREEN}▌${R}"; no="${GRAY}  No  ${R}"
         else
-            yes="${GRAY} Yes ${R}"; no="${BG_RED}${B} No ${R}${SHADOW}▌${R}"
+            yes="${GRAY}  Yes  ${R}"; no="${RED}▐${BG_RED}${B} No ${R}${RED}▌${R}"
         fi
         printf '\r\033[K   %s%s%s %s%s%s   %s %s   %s←/→ · y/n · Enter%s' \
             "$PURPLE" "$lead" "$R" "$B$TEXT" "$q" "$R" "$yes" "$no" "$DIM$GRAY" "$R"
@@ -331,28 +395,37 @@ ask_reboot() {
     fi
 }
 
-# ---------- arrow-key menu (raised selected "button") ----------
+# ---------- framed arrow-key menu (gradient border, glowing selection) ----------
 MENU_ITEMS=("Update system" "Full installation" "Uninstall lshell" "Exit")
 MENU_DESC=("Refresh databases and upgrade all packages" "Install Sway, Waybar, Rofi, Kitty and configs" "Remove LShell configs and packages" "Leave the installer")
 MENU_ICONS=("↻" "✦" "✖" "↩")
 MENU_ACC=("$CYAN" "$PURPLE" "$RED" "$GRAY")
 MENU_CHOICE=0
+MW=56
 
 menu() {
-    local sel=0 key k2 n=${#MENU_ITEMS[@]} i acc ic ti de
+    local sel=0 key k2 n=${#MENU_ITEMS[@]} i acc ic ti de blank
+    printf -v blank '%*s' "$MW" ''
+
+    grad_line "─" "$MW"
+    printf '   %s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
+
     tput civis 2>/dev/null || true
     while true; do
         for i in "${!MENU_ITEMS[@]}"; do
             acc="${MENU_ACC[$i]}"; ic="${MENU_ICONS[$i]}"; ti="${MENU_ITEMS[$i]}"; de="${MENU_DESC[$i]}"
             if [ "$i" -eq "$sel" ]; then
-                printf '\r\033[K   %s█%s%s  %s%s  %s%-46s%s%s▐%s\n' "$acc" "$R" "$BG_SEL" "$acc$B" "$ic" "$TEXT$B" "$ti" "$R" "$SHADOW" "$R"
-                printf '\r\033[K   %s█%s%s     %s%-46s%s%s▐%s\n' "$acc" "$R" "$BG_SEL" "$GRAY" "$de" "$R" "$SHADOW" "$R"
-                printf '\r\033[K    %s▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀%s\n' "$SHADOW" "$R"
+                printf '\r\033[K   %s│%s%s%s▌%s %s%s  %s%-51s%s%s│%s\n' \
+                    "$CYAN" "$R" "$BG_SEL" "$acc" "$BG_SEL" "$acc$B" "$ic" "$TEXT$B" "$ti" "$R" "$PINK" "$R"
+                printf '\r\033[K   %s│%s%s%s▌%s    %s%-51s%s%s│%s\n' \
+                    "$CYAN" "$R" "$BG_SEL" "$acc" "$BG_SEL" "$GRAY" "$de" "$R" "$PINK" "$R"
             else
-                printf '\r\033[K       %s%s  %s%-46s%s\n' "$GRAY" "$ic" "$TEXT" "$ti" "$R"
-                printf '\r\033[K         %s%-46s%s\n' "$DIM$GRAY" "$de" "$R"
-                printf '\r\033[K\n'
+                printf '\r\033[K   %s│%s  %s%s  %s%-51s%s%s│%s\n' \
+                    "$CYAN" "$R" "$GRAY" "$ic" "$TEXT" "$ti" "$R" "$PINK" "$R"
+                printf '\r\033[K   %s│%s   %s  %s%-51s%s%s│%s\n' \
+                    "$CYAN" "$R" "$GRAY" "$DIM$GRAY" "$de" "$R" "$PINK" "$R"
             fi
+            printf '\r\033[K   %s│%s%s%s│%s\n' "$CYAN" "$R" "$blank" "$PINK" "$R"
         done
         key=""
         IFS= read -rsn1 key || key=""
@@ -374,6 +447,9 @@ menu() {
         printf '\033[%dA' $((n * 3))
     done
     tput cnorm 2>/dev/null || true
+
+    grad_line "─" "$MW"
+    printf '   %s╰%s%s╯%s\n' "$CYAN" "$LINE" "$PINK" "$R"
     MENU_CHOICE=$sel
 }
 
