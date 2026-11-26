@@ -2,14 +2,14 @@
 set -Eeuo pipefail
 
 # ============================================================
-#  LSHELL INSTALLER
+#  LSHELL INSTALLER  (3D edition)
 # ============================================================
 
 LOG="/tmp/lshell-installer.log"
 MANIFEST_DIR="$HOME/.local/share/lshell"
 MANIFEST="$MANIFEST_DIR/manifest"
 REPO_URL="https://github.com/deploydy/lshell-play"
-VERSION="1.1"
+VERSION="1.2"
 T0=$SECONDS
 
 # ---------- palette (truecolor) ----------
@@ -26,6 +26,7 @@ RED=$'\033[38;2;248;113;113m'
 TEXT=$'\033[38;2;228;228;236m'
 GRAY=$'\033[38;2;130;130;150m'
 DARK=$'\033[38;2;60;58;90m'
+SHADOW=$'\033[38;2;38;36;62m'
 BG_SEL=$'\033[48;2;34;30;66m'
 BG_GREEN=$'\033[48;2;134;239;172m\033[38;2;20;20;30m'
 BG_RED=$'\033[48;2;248;113;113m\033[38;2;20;20;30m'
@@ -73,11 +74,13 @@ grad_line() {
 }
 
 # ============================================================
-#  LOGO  (block letters, gradient + offset shadow)
+#  3D LOGO  (extruded block letters: lit top edge, shaded
+#            bottom edge, diagonal depth with fading layers)
 # ============================================================
 
+LOGO_DEPTH=3
 LOGO_W=0
-LOGO_H=6
+LOGO_H=0
 LOGO_CELLS=()
 
 build_logo() {
@@ -87,7 +90,7 @@ build_logo() {
         [H]="X.XX.XXXXX.XX.X"
         [E]="XXXX..XX.X..XXX"
     )
-    local word="LSHELL" r k ch row x y cell
+    local word="LSHELL" r k ch row x y cell d sy sx pct cr cg cb
     local -a mask=()
 
     for ((r = 0; r < 5; r++)); do
@@ -102,18 +105,43 @@ build_logo() {
 
     local units=${#mask[0]}
     local lw=$(( units * 2 ))
-    LOGO_W=$(( lw + 2 ))
+    LOGO_H=$(( 5 + LOGO_DEPTH ))
+    LOGO_W=$(( lw + 2 * LOGO_DEPTH ))
     LOGO_CELLS=()
 
     for ((y = 0; y < LOGO_H; y++)); do
         for ((x = 0; x < LOGO_W; x++)); do
             cell=" "
             if (( y < 5 && x < lw )) && [ "${mask[$y]:$((x / 2)):1}" = "X" ]; then
+                # ---- front face ----
                 grad_rgb "$x" $(( LOGO_W - 1 ))
-                printf -v cell '\033[38;2;%d;%d;%dm█' "$GR" "$GG" "$GB"
-            elif (( y >= 1 && x >= 2 && x - 2 < lw )) && [ "${mask[$((y - 1))]:$(( (x - 2) / 2 )):1}" = "X" ]; then
-                grad_rgb "$x" $(( LOGO_W - 1 ))
-                printf -v cell '\033[38;2;%d;%d;%dm░' $(( GR * 50 / 100 )) $(( GG * 50 / 100 )) $(( GB * 50 / 100 ))
+                cr=$GR; cg=$GG; cb=$GB
+                if (( y == 0 )) || [ "${mask[$((y - 1))]:$((x / 2)):1}" != "X" ]; then
+                    # lit top edge
+                    cr=$(( cr + (255 - cr) * 55 / 100 ))
+                    cg=$(( cg + (255 - cg) * 55 / 100 ))
+                    cb=$(( cb + (255 - cb) * 55 / 100 ))
+                elif (( y == 4 )) || [ "${mask[$((y + 1))]:$((x / 2)):1}" != "X" ]; then
+                    # shaded bottom edge
+                    cr=$(( cr * 72 / 100 ))
+                    cg=$(( cg * 72 / 100 ))
+                    cb=$(( cb * 72 / 100 ))
+                fi
+                printf -v cell '\033[38;2;%d;%d;%dm█' "$cr" "$cg" "$cb"
+            else
+                # ---- extrusion: nearest layer wins, farther = darker ----
+                for ((d = 1; d <= LOGO_DEPTH; d++)); do
+                    sy=$(( y - d ))
+                    sx=$(( x - 2 * d ))
+                    if (( sy >= 0 && sy < 5 && sx >= 0 && sx < lw )) \
+                       && [ "${mask[$sy]:$((sx / 2)):1}" = "X" ]; then
+                        grad_rgb "$x" $(( LOGO_W - 1 ))
+                        pct=$(( 62 - (d - 1) * 17 ))
+                        printf -v cell '\033[38;2;%d;%d;%dm█' \
+                            $(( GR * pct / 100 )) $(( GG * pct / 100 )) $(( GB * pct / 100 ))
+                        break
+                    fi
+                done
             fi
             LOGO_CELLS+=("$cell")
         done
@@ -156,7 +184,7 @@ banner() {
 
     echo
     printf '   %*s%sLiquid Shell · installer · v%s%s\n' 8 '' "$GRAY" "$VERSION" "$R"
-    grad_line "─" "$LOGO_W"
+    grad_line "▀" "$LOGO_W"
     printf '   %s\n' "$LINE"
     echo
     printf '   %s◆%s %sSway%s %s·%s %sWaybar%s %s·%s %sRofi%s %s·%s %sKitty%s\n' \
@@ -177,7 +205,7 @@ rail_top()  { RAILC="${2:-$PURPLE}"; printf '\n   %s╭─%s %s%s%s%s\n' "$RAILC
 rail()      { printf '   %s│%s  %s\n' "$RAILC" "$R" "$1"; }
 rail_end()  { printf '   %s╰─%s\n' "$RAILC" "$R"; }
 
-# gradient progress bar -> $BAR
+# 3D gradient progress bar -> $BAR   (solid fill, recessed track)
 BARW=20
 BAR=""
 gbar() {
@@ -186,9 +214,9 @@ gbar() {
     for ((i = 0; i < BARW; i++)); do
         if (( i < f )); then
             grad_rgb "$i" $(( BARW - 1 ))
-            BAR+=$'\033[38;2;'"$GR;$GG;${GB}m━"
+            BAR+=$'\033[38;2;'"$GR;$GG;${GB}m█"
         else
-            BAR+="${DARK}─"
+            BAR+="${SHADOW}░"
         fi
     done
     BAR+="$R"
@@ -248,15 +276,18 @@ run() {
     fi
 }
 
+# floating summary card with a drop shadow
 summary() {
-    local t=$((SECONDS - T0)) took
+    local t=$((SECONDS - T0)) took sh
     took=$(printf '%dm %02ds' $((t / 60)) $((t % 60)))
+    printf -v sh '▒%.0s' $(seq 1 52)
     grad_line "─" 50
     echo
     printf '   %s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
-    printf '   %s│%s %s✔%s  %s%s%-46s%s%s│%s\n' "$CYAN" "$R" "$GREEN$B" "$R" "$B" "$TEXT" "$1" "$R" "$PINK" "$R"
-    printf '   %s│%s    %s%-46s%s%s│%s\n' "$CYAN" "$R" "$GRAY" "Finished in $took" "$R" "$PINK" "$R"
-    printf '   %s╰%s%s╯%s\n' "$CYAN" "$LINE" "$PINK" "$R"
+    printf '   %s│%s %s✔%s  %s%s%-46s%s%s│%s%s▒%s\n' "$CYAN" "$R" "$GREEN$B" "$R" "$B" "$TEXT" "$1" "$R" "$PINK" "$R" "$SHADOW" "$R"
+    printf '   %s│%s    %s%-46s%s%s│%s%s▒%s\n' "$CYAN" "$R" "$GRAY" "Finished in $took" "$R" "$PINK" "$R" "$SHADOW" "$R"
+    printf '   %s╰%s%s╯%s%s▒%s\n' "$CYAN" "$LINE" "$PINK" "$R" "$SHADOW" "$R"
+    printf '    %s%s%s\n' "$SHADOW" "$sh" "$R"
     echo
 }
 
@@ -266,9 +297,9 @@ confirm() {
     tput civis 2>/dev/null || true
     while true; do
         if [ "$sel" -eq 0 ]; then
-            yes="${BG_GREEN}${B} Yes ${R}"; no="${GRAY} No ${R}"
+            yes="${BG_GREEN}${B} Yes ${R}${SHADOW}▌${R}"; no="${GRAY} No ${R}"
         else
-            yes="${GRAY} Yes ${R}"; no="${BG_RED}${B} No ${R}"
+            yes="${GRAY} Yes ${R}"; no="${BG_RED}${B} No ${R}${SHADOW}▌${R}"
         fi
         printf '\r\033[K   %s%s%s %s%s%s   %s %s   %s←/→ · y/n · Enter%s' \
             "$PURPLE" "$lead" "$R" "$B$TEXT" "$q" "$R" "$yes" "$no" "$DIM$GRAY" "$R"
@@ -300,7 +331,7 @@ ask_reboot() {
     fi
 }
 
-# ---------- arrow-key menu ----------
+# ---------- arrow-key menu (raised selected "button") ----------
 MENU_ITEMS=("Update system" "Full installation" "Uninstall lshell" "Exit")
 MENU_DESC=("Refresh databases and upgrade all packages" "Install Sway, Waybar, Rofi, Kitty and configs" "Remove LShell configs and packages" "Leave the installer")
 MENU_ICONS=("↻" "✦" "✖" "↩")
@@ -314,13 +345,14 @@ menu() {
         for i in "${!MENU_ITEMS[@]}"; do
             acc="${MENU_ACC[$i]}"; ic="${MENU_ICONS[$i]}"; ti="${MENU_ITEMS[$i]}"; de="${MENU_DESC[$i]}"
             if [ "$i" -eq "$sel" ]; then
-                printf '\r\033[K   %s▌%s%s  %s%s  %s%-46s%s\n' "$acc" "$R" "$BG_SEL" "$acc$B" "$ic" "$TEXT$B" "$ti" "$R"
-                printf '\r\033[K   %s▌%s%s     %s%-46s%s\n' "$acc" "$R" "$BG_SEL" "$GRAY" "$de" "$R"
+                printf '\r\033[K   %s█%s%s  %s%s  %s%-46s%s%s▐%s\n' "$acc" "$R" "$BG_SEL" "$acc$B" "$ic" "$TEXT$B" "$ti" "$R" "$SHADOW" "$R"
+                printf '\r\033[K   %s█%s%s     %s%-46s%s%s▐%s\n' "$acc" "$R" "$BG_SEL" "$GRAY" "$de" "$R" "$SHADOW" "$R"
+                printf '\r\033[K    %s▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀%s\n' "$SHADOW" "$R"
             else
                 printf '\r\033[K       %s%s  %s%-46s%s\n' "$GRAY" "$ic" "$TEXT" "$ti" "$R"
                 printf '\r\033[K         %s%-46s%s\n' "$DIM$GRAY" "$de" "$R"
+                printf '\r\033[K\n'
             fi
-            printf '\r\033[K\n'
         done
         key=""
         IFS= read -rsn1 key || key=""
