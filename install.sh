@@ -2,15 +2,23 @@
 set -Eeuo pipefail
 
 # ============================================================
-#  LSHELL INSTALLER  (3D edition · v1.3)
+#  LSHELL INSTALLER  (3D edition · v1.4 · multi-distro)
+#  Arch / Debian / Fedora (and derivatives) - auto-detected
+#  Override detection:  LSHELL_DISTRO=arch|debian|fedora ./lshell-installer.sh
 # ============================================================
 
 LOG="/tmp/lshell-installer.log"
+MISSING_FILE="/tmp/lshell-missing.tmp"
+FXFAIL_FILE="/tmp/lshell-fxfail.tmp"
 MANIFEST_DIR="$HOME/.local/share/lshell"
 MANIFEST="$MANIFEST_DIR/manifest"
+SRC_DIR="$MANIFEST_DIR/src"
+NERD_DIR="$HOME/.local/share/fonts/lshell-nerd"
 REPO_URL="https://github.com/deploydy/lshell-play"
-VERSION="1.3"
+VERSION="1.4"
 T0=$SECONDS
+
+export DEBIAN_FRONTEND=noninteractive
 
 # ---------- palette (truecolor) ----------
 R=$'\033[0m'
@@ -40,6 +48,111 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'echo; exit 130' INT
+
+# ============================================================
+#  DISTRO DETECTION
+# ============================================================
+
+FAMILY=""
+DISTRO_NAME="Linux"
+
+osr() {
+    if [ -r /etc/os-release ]; then
+        sed -n "s/^$1=//p" /etc/os-release | head -n1 | tr -d '"'
+    fi
+}
+
+detect_distro() {
+    local id like all
+    id=$(osr ID || true)
+    like=$(osr ID_LIKE || true)
+    DISTRO_NAME=$(osr PRETTY_NAME || true)
+    if [ -z "$DISTRO_NAME" ]; then DISTRO_NAME="Linux"; fi
+    all=" ${id} ${like} "
+
+    case "$all" in
+        *" arch "* | *" archlinux "*)   FAMILY="arch" ;;
+        *" debian "* | *" ubuntu "*)    FAMILY="debian" ;;
+        *" fedora "*)                   FAMILY="fedora" ;;
+    esac
+
+    if [ -z "$FAMILY" ]; then
+        if   command -v pacman  &> /dev/null; then FAMILY="arch"
+        elif command -v apt-get &> /dev/null; then FAMILY="debian"
+        elif command -v dnf     &> /dev/null; then FAMILY="fedora"
+        fi
+    fi
+
+    if [ -n "${LSHELL_DISTRO:-}" ]; then FAMILY="$LSHELL_DISTRO"; fi
+}
+
+# ============================================================
+#  PACKAGE MANAGER ABSTRACTION
+# ============================================================
+
+apt_get() { sudo env DEBIAN_FRONTEND=noninteractive apt-get -y "$@"; }
+
+pkg_refresh() {
+    case "$FAMILY" in
+        arch)   sudo pacman -Syy ;;
+        debian) apt_get update ;;
+        fedora) sudo dnf -y makecache --refresh ;;
+    esac
+}
+
+pkg_upgrade() {
+    case "$FAMILY" in
+        arch)   sudo pacman -Su --noconfirm ;;
+        debian) apt_get upgrade ;;
+        fedora) sudo dnf -y upgrade --refresh ;;
+    esac
+}
+
+pkg_installed() {
+    case "$FAMILY" in
+        arch)   pacman -Qq "$1" &> /dev/null ;;
+        debian) [[ "$(dpkg-query -W -f='${Status}' "$1" 2> /dev/null || true)" == *"install ok installed"* ]] ;;
+        fedora) rpm -q "$1" &> /dev/null ;;
+    esac
+}
+
+pkg_try_install() {
+    case "$FAMILY" in
+        arch)   sudo pacman -S --needed --noconfirm "$1" ;;
+        debian) apt_get install "$1" ;;
+        fedora) sudo dnf -y install "$1" ;;
+    esac
+}
+
+pkg_remove() {
+    case "$FAMILY" in
+        arch)   sudo pacman -Rns --noconfirm "$1" ;;
+        debian) apt_get remove "$1" ;;
+        fedora) sudo dnf -y remove "$1" ;;
+    esac
+}
+
+# pkg_install_tolerant <spec...>
+# spec = "name" or "alt1|alt2|alt3" (first alternative that exists wins).
+# Packages missing from the repos are collected in $MISSING_FILE instead of aborting.
+pkg_install_tolerant() {
+    local spec alt ok
+    local -a alts
+    : > "$MISSING_FILE"
+    for spec in "$@"; do
+        ok=0
+        IFS='|' read -ra alts <<< "$spec"
+        for alt in "${alts[@]}"; do
+            if pkg_installed "$alt"; then ok=1; break; fi
+            if pkg_try_install "$alt"; then ok=1; break; fi
+        done
+        if (( ok == 0 )); then
+            echo "$spec" >> "$MISSING_FILE"
+            echo "!! not available: $spec"
+        fi
+    done
+    return 0
+}
 
 # ============================================================
 #  GRADIENT HELPERS   cyan -> violet -> pink
@@ -245,7 +358,7 @@ banner() {
     printf '   %s◆%s %sSway%s %s·%s %sWaybar%s %s·%s %sRofi%s %s·%s %sKitty%s\n' \
         "$PURPLE" "$R" "$CYAN" "$R" "$DARK" "$R" "$BLUE" "$R" "$DARK" "$R" "$PURPLE" "$R" "$DARK" "$R" "$PINK" "$R"
     printf '   %s%s%s\n' "$DIM$GRAY" "$REPO_URL" "$R"
-    printf '   %sArch Linux · %s@%s%s\n' "$DIM$GRAY" "${USER:-user}" "${HOSTNAME:-host}" "$R"
+    printf '   %s%s · %s@%s%s\n' "$DIM$GRAY" "$DISTRO_NAME" "${USER:-user}" "${HOSTNAME:-host}" "$R"
     echo
 }
 
@@ -285,14 +398,18 @@ gbar() {
 
 STEP=0
 TOTAL=0
+SOFT=0
+SOFT_FAILED=0
 
 # run "message" command args...
 # the bar creeps forward while a step is running, then snaps to the step end
+# with SOFT=1 (see run_soft) a failing step is reported and skipped instead of aborting
 run() {
     local msg="$1"; shift
     local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
     local i=0 t0=$SECONDS el pct p sc ease units
     STEP=$((STEP + 1))
+    SOFT_FAILED=0
 
     echo "=== [$STEP/$TOTAL] $msg ===" >> "$LOG"
     "$@" >> "$LOG" 2>&1 < /dev/null &
@@ -329,6 +446,10 @@ run() {
             "$GREEN" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" \
             "$TEXT" "$msg" "$R" \
             "$BAR" "$GRAY" $(( STEP * 100 / TOTAL )) "$R" "$DIM$GRAY" "$el" "$R"
+    elif (( SOFT )); then
+        SOFT_FAILED=1
+        printf '   %s▲%s %s%d/%d%s  %s%-34s%s %s(skipped — see %s)%s\n' \
+            "$YELLOW" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" "$TEXT" "$msg" "$R" "$GRAY" "$LOG" "$R"
     else
         printf '   %s✘%s %s%d/%d%s  %s%s%s\n' "$RED" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" "$TEXT" "$msg" "$R"
         rail_top "Step failed — last log lines" "$RED"
@@ -338,6 +459,8 @@ run() {
         exit 1
     fi
 }
+
+run_soft() { SOFT=1; run "$@"; SOFT=0; }
 
 # floating summary card with a drop shadow
 summary() {
@@ -457,17 +580,44 @@ menu() {
 #  CHECKS
 # ============================================================
 
+detect_distro
+
 if [ "$EUID" -eq 0 ]; then
     banner; fail "Do not run this script as root!"; exit 1
 fi
-if ! command -v pacman &> /dev/null; then
-    banner; fail "pacman not found. This script requires Arch Linux."; exit 1
-fi
-if ! command -v yay &> /dev/null; then
-    banner; fail "yay is not installed."; exit 1
+case "$FAMILY" in
+    arch)
+        if ! command -v pacman &> /dev/null; then
+            banner; fail "pacman not found."; exit 1
+        fi
+        if ! command -v yay &> /dev/null; then
+            banner; fail "yay is not installed."; exit 1
+        fi
+        ;;
+    debian)
+        if ! command -v apt-get &> /dev/null; then
+            banner; fail "apt-get not found."; exit 1
+        fi
+        ;;
+    fedora)
+        if ! command -v dnf &> /dev/null; then
+            banner; fail "dnf not found."; exit 1
+        fi
+        ;;
+    *)
+        banner; fail "Unsupported distribution: $DISTRO_NAME"
+        info "Supported: Arch, Debian/Ubuntu, Fedora (and derivatives)"
+        info "Force a family with: LSHELL_DISTRO=arch|debian|fedora"
+        exit 1
+        ;;
+esac
+if ! command -v sudo &> /dev/null; then
+    banner; fail "sudo is not installed."; exit 1
 fi
 
 : > "$LOG"
+: > "$MISSING_FILE"
+rm -f "$FXFAIL_FILE"
 
 start_sudo() {
     sudo -v
@@ -476,13 +626,14 @@ start_sudo() {
 }
 
 # ============================================================
-#  CONFLICT HANDLING
+#  CONFLICT HANDLING   (pacman only)
 # ============================================================
 
 # resolve_conflicts <pacman args...>
 # Dry-runs the transaction, finds "A and B are in conflict" and
 # asks whether to remove the conflicting installed packages.
 resolve_conflicts() {
+    if [ "$FAMILY" != "arch" ]; then return 0; fi
     info "Checking for package conflicts"
     local out lines line new old tgt
     local -a targets=()
@@ -536,7 +687,7 @@ resolve_conflicts() {
     fi
 }
 
-# offer_remove <installed-pkg> <reason>
+# offer_remove <installed-pkg> <reason>   (pacman only)
 offer_remove() {
     local pkg="$1" reason="$2"
     pacman -Qq "$pkg" &> /dev/null || return 0
@@ -554,41 +705,22 @@ offer_remove() {
     fi
 }
 
+# report_missing  ->  shows packages that the repos of this distro do not have
+report_missing() {
+    if [ -s "$MISSING_FILE" ]; then
+        local l
+        rail_top "Not available in your repositories" "$YELLOW"
+        while IFS= read -r l; do rail "${TEXT}${l}${R}"; done < "$MISSING_FILE"
+        rail "${GRAY}Skipped — install them manually if you need them.${R}"
+        rail_end
+    fi
+}
+
 # ============================================================
-#  ACTIONS
+#  PACKAGE LISTS
 # ============================================================
 
-do_update() {
-    TOTAL=2
-    start_sudo
-    echo
-
-    run "Refreshing package databases" sudo pacman -Syy
-    resolve_conflicts -Su
-    run "Upgrading packages" sudo pacman -Su --noconfirm
-
-    summary "Update completed"
-    ask_reboot
-}
-
-build_aur() {
-    local name="$1"
-    ( cd "$BUILD_DIR" \
-      && git clone "https://aur.archlinux.org/$name.git" \
-      && cd "$name" \
-      && makepkg -si --noconfirm )
-}
-
-install_configs() {
-    rm -rf "$HOME/lshell-play"
-    git clone "$REPO_URL" "$HOME/lshell-play"
-    mkdir -p "$HOME/.config" "$MANIFEST_DIR"
-    ( cd "$HOME/lshell-play" && ls -A | grep -vx '.git' ) > "$MANIFEST"
-    cp -r "$HOME/lshell-play/"* "$HOME/.config/"
-    rm -rf "$HOME/lshell-play"
-}
-
-CORE_PKGS=(
+CORE_ARCH=(
     git autotiling swaybg waybar kitty rofi
     papirus-icon-theme ttf-fira-code ttf-jetbrains-mono-nerd
     ttf-nerd-fonts-symbols otf-font-awesome noto-fonts-emoji
@@ -598,26 +730,268 @@ CORE_PKGS=(
     python-rich wl-clipboard swaync lutris ppsspp qbittorrent
 )
 
-do_install() {
-    TOTAL=9
+# "a|b" = alternatives, first one found in the repos is installed
+CORE_DEBIAN=(
+    git curl tar xz-utils fontconfig
+    swaybg waybar kitty rofi
+    papirus-icon-theme fonts-firacode fonts-font-awesome fonts-noto-color-emoji
+    gsimplecal wtype rofi-emoji dolphin bluez blueman
+    fastfetch python3 python3-pip pipx python3-gi gir1.2-gtk-3.0
+    "policykit-1-gnome|polkit-gnome"
+    python3-cryptography python3-requests python3-bs4 python3-rich
+    wl-clipboard "sway-notification-center|swaync" wlogout grim slurp
+    lutris ppsspp qbittorrent
+)
+
+CORE_FEDORA=(
+    git curl tar xz fontconfig
+    swaybg waybar kitty "rofi-wayland|rofi"
+    papirus-icon-theme fira-code-fonts jetbrains-mono-fonts
+    "fontawesome-fonts-all|fontawesome-fonts" google-noto-emoji-fonts
+    gsimplecal wtype rofi-emoji dolphin bluez blueman nwg-displays
+    fastfetch python3 python3-pip pipx python3-gobject gtk3 polkit-gnome
+    python3-cryptography python3-requests python3-beautifulsoup4 python3-rich
+    wl-clipboard SwayNotificationCenter wlogout grim slurp
+    lutris ppsspp qbittorrent
+)
+
+# build dependencies for SwayFX on Debian (missing names are skipped)
+SWAYFX_BUILD_DEPS_DEBIAN=(
+    meson ninja-build cmake pkg-config scdoc git wayland-protocols libwayland-dev
+    libxkbcommon-dev libegl-dev libgles-dev libgbm-dev libdrm-dev libpixman-1-dev
+    libjson-c-dev libpcre2-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev
+    libevdev-dev libinput-dev libseat-dev libudev-dev libsystemd-dev glslang-tools
+    libvulkan-dev libliftoff-dev libdisplay-info-dev hwdata
+    libxcb1-dev libxcb-composite0-dev libxcb-icccm4-dev libxcb-render0-dev
+    libxcb-xfixes0-dev libxcb-res0-dev libxcb-dri3-dev libxcb-present-dev
+    libxcb-ewmh-dev libxcb-errors-dev libxcb-shm0-dev libxcb-xinput-dev
+)
+
+PIP_TOOLS=(autotiling waypaper nwg-displays)
+
+# ============================================================
+#  ACTIONS - building blocks
+# ============================================================
+
+build_aur() {
+    local name="$1"
+    ( cd "$BUILD_DIR" \
+      && git clone "https://aur.archlinux.org/$name.git" \
+      && cd "$name" \
+      && makepkg -si --noconfirm )
+}
+
+# Nerd Fonts (JetBrains Mono + symbols) for distros that do not package them
+install_nerd_fonts() {
+    local tmp f base="https://github.com/ryanoasis/nerd-fonts/releases/latest/download"
+    mkdir -p "$NERD_DIR"
+    tmp=$(mktemp -d)
+    for f in JetBrainsMono NerdFontsSymbolsOnly; do
+        curl -fsSL "$base/$f.tar.xz" -o "$tmp/$f.tar.xz" || { rm -rf "$tmp"; return 1; }
+        tar -xJf "$tmp/$f.tar.xz" -C "$NERD_DIR" || { rm -rf "$tmp"; return 1; }
+    done
+    rm -rf "$tmp"
+    fc-cache -f "$NERD_DIR"
+}
+
+# autotiling / waypaper / nwg-displays are not packaged on Debian, some not on Fedora
+install_pip_tools() {
+    local tool b
+    for tool in "${PIP_TOOLS[@]}"; do
+        if command -v "$tool" &> /dev/null; then continue; fi
+        if command -v pipx &> /dev/null; then
+            pipx install --system-site-packages "$tool" || echo "!! failed: $tool"
+        else
+            python3 -m pip install --user --break-system-packages "$tool" || echo "!! failed: $tool"
+        fi
+    done
+    for b in "${PIP_TOOLS[@]}"; do
+        if [ -x "$HOME/.local/bin/$b" ]; then
+            sudo ln -sf "$HOME/.local/bin/$b" "/usr/local/bin/$b"
+        fi
+    done
+    return 0
+}
+
+# ---------- SwayFX ----------
+
+WANT_FX=1
+
+choose_swayfx() {
+    case "$FAMILY" in
+        debian)
+            rail_top "SwayFX" "$PURPLE"
+            rail "${GRAY}SwayFX is not packaged for Debian. It can be built from source${R}"
+            rail "${GRAY}(slow, may fail). Otherwise stock sway is installed and the${R}"
+            rail "${GRAY}blur / rounded corners / shadows from the config will not work.${R}"
+            if confirm "Build SwayFX from source?" 0 "╰─"; then WANT_FX=1; else WANT_FX=0; fi
+            ;;
+        fedora)
+            rail_top "SwayFX" "$PURPLE"
+            rail "${GRAY}SwayFX is installed from the swayfx/swayfx COPR repository.${R}"
+            if pkg_installed sway; then
+                rail "${GRAY}It will replace the installed stock sway.${R}"
+            fi
+            if confirm "Use SwayFX?" 0 "╰─"; then WANT_FX=1; else WANT_FX=0; fi
+            ;;
+    esac
+}
+
+build_swayfx_src() {
+    local name d
+    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+    apt_get build-dep sway || echo "build-dep unavailable (deb-src not enabled) - installing dependencies by name"
+    for d in "${SWAYFX_BUILD_DEPS_DEBIAN[@]}"; do
+        if pkg_installed "$d"; then continue; fi
+        pkg_try_install "$d" || echo "!! dependency not available: $d"
+    done
+    for d in libwlroots-0.19-dev libwlroots-0.18-dev libwlroots-dev; do
+        if pkg_installed "$d" || pkg_try_install "$d"; then break; fi
+    done
+
+    mkdir -p "$SRC_DIR" || return 1
+    for name in scenefx swayfx; do
+        rm -rf "${SRC_DIR:?}/$name"
+        git clone --depth 1 "https://github.com/WillPower3309/$name.git" "$SRC_DIR/$name" || return 1
+        meson setup "$SRC_DIR/$name/build" "$SRC_DIR/$name" \
+            --prefix=/usr/local --libdir=lib --buildtype=release || return 1
+        ninja -C "$SRC_DIR/$name/build" || return 1
+        sudo ninja -C "$SRC_DIR/$name/build" install || return 1
+        sudo ldconfig || true
+    done
+    return 0
+}
+
+install_sway_debian() {
+    rm -f "$FXFAIL_FILE"
+    apt_get install sway || return 1
+    if (( WANT_FX == 0 )); then return 0; fi
+    if build_swayfx_src; then return 0; fi
+    : > "$FXFAIL_FILE"
+    return 0
+}
+
+install_sway_fedora() {
+    rm -f "$FXFAIL_FILE"
+    if (( WANT_FX )); then
+        sudo dnf -y install dnf-plugins-core || true
+        if sudo dnf -y copr enable swayfx/swayfx && sudo dnf -y install --allowerasing swayfx; then
+            return 0
+        fi
+        : > "$FXFAIL_FILE"
+    fi
+    sudo dnf -y install sway
+}
+
+report_fx_failure() {
+    if [ -e "$FXFAIL_FILE" ]; then
+        warn "SwayFX could not be installed — stock sway is used instead."
+        warn "Blur, rounded corners and shadows in the sway config will not work (see $LOG)."
+    fi
+}
+
+# ---------- configs ----------
+
+# the polkit agent lives in a different place on every distro
+patch_configs() {
+    if [ "$FAMILY" = "arch" ]; then return 0; fi
+    local agent="" p f
+    for p in /usr/libexec/polkit-gnome-authentication-agent-1 \
+             /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 \
+             /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1; do
+        if [ -x "$p" ]; then agent="$p"; break; fi
+    done
+    if [ -z "$agent" ] || [ ! -d "$HOME/.config/sway" ]; then return 0; fi
+    while IFS= read -r f; do
+        sed -i -E "s#[^ \"']*polkit-gnome-authentication-agent-1#$agent#g" "$f"
+    done < <(grep -rlI 'polkit-gnome-authentication-agent-1' "$HOME/.config/sway" 2>/dev/null || true)
+    return 0
+}
+
+install_configs() {
+    rm -rf "$HOME/lshell-play"
+    git clone "$REPO_URL" "$HOME/lshell-play"
+    mkdir -p "$HOME/.config" "$MANIFEST_DIR"
+    ( cd "$HOME/lshell-play" && ls -A | grep -vx '.git' ) > "$MANIFEST"
+    cp -r "$HOME/lshell-play/"* "$HOME/.config/"
+    rm -rf "$HOME/lshell-play"
+    patch_configs
+}
+
+# ============================================================
+#  ACTIONS
+# ============================================================
+
+do_update() {
+    TOTAL=2
     start_sudo
-    BUILD_DIR=$(mktemp -d)
     echo
 
-    run "Refreshing package databases" sudo pacman -Syy
+    run "Refreshing package databases" pkg_refresh
     resolve_conflicts -Su
-    run "Upgrading system" sudo pacman -Su --noconfirm
+    run "Upgrading packages" pkg_upgrade
 
-    resolve_conflicts -S --needed "${CORE_PKGS[@]}"
-    run "Installing core packages" sudo pacman -S --needed --noconfirm "${CORE_PKGS[@]}"
+    summary "Update completed"
+    ask_reboot
+}
+
+install_stack_arch() {
+    resolve_conflicts -S --needed "${CORE_ARCH[@]}"
+    run "Installing core packages" sudo pacman -S --needed --noconfirm "${CORE_ARCH[@]}"
 
     run "Installing AUR packages" yay -S --needed --noconfirm waypaper wlogout grim slurp
     run "Building scenefx0.5" build_aur scenefx0.5
 
     offer_remove sway "conflicts with swayfx"
     run "Building swayfx" build_aur swayfx
+}
 
-    run "Generating fastfetch config" fastfetch --gen-config
+install_stack_debian() {
+    run_soft "Installing core packages" pkg_install_tolerant "${CORE_DEBIAN[@]}"
+    report_missing
+    run_soft "Installing Nerd Fonts" install_nerd_fonts
+    run_soft "Installing Python tools" install_pip_tools
+    if (( WANT_FX )); then
+        run_soft "Installing sway + building swayfx" install_sway_debian
+    else
+        run_soft "Installing sway" install_sway_debian
+    fi
+    report_fx_failure
+}
+
+install_stack_fedora() {
+    run_soft "Installing core packages" pkg_install_tolerant "${CORE_FEDORA[@]}"
+    report_missing
+    run_soft "Installing Nerd Fonts" install_nerd_fonts
+    run_soft "Installing Python tools" install_pip_tools
+    run_soft "Installing swayfx" install_sway_fedora
+    report_fx_failure
+}
+
+do_install() {
+    TOTAL=9
+    start_sudo
+    BUILD_DIR=$(mktemp -d)
+    echo
+
+    choose_swayfx
+
+    run "Refreshing package databases" pkg_refresh
+    resolve_conflicts -Su
+    run "Upgrading system" pkg_upgrade
+
+    case "$FAMILY" in
+        arch)   install_stack_arch ;;
+        debian) install_stack_debian ;;
+        fedora) install_stack_fedora ;;
+    esac
+
+    if [ "$FAMILY" = "arch" ]; then
+        run "Generating fastfetch config" fastfetch --gen-config
+    else
+        run_soft "Generating fastfetch config" fastfetch --gen-config
+    fi
     run "Removing old waybar config" rm -rf "$HOME/.config/waybar/config.jsonc"
     run "Installing lshell configs" install_configs
 
@@ -625,11 +999,85 @@ do_install() {
     ask_reboot
 }
 
+# ---------- uninstall helpers ----------
+
+remove_configs() {
+    local items=()
+    if [ -f "$MANIFEST" ]; then
+        mapfile -t items < "$MANIFEST"
+    else
+        items=(sway waybar rofi swaync wlogout waypaper kitty fastfetch autotiling gsimplecal nwg-displays)
+    fi
+    local item
+    for item in "${items[@]}"; do
+        [ -n "$item" ] && rm -rf "$HOME/.config/${item:?}"
+    done
+    return 0
+}
+
+remove_source_builds() {
+    local name b
+    for name in swayfx scenefx; do
+        b="$SRC_DIR/$name/build"
+        if [ -d "$b" ]; then sudo ninja -C "$b" uninstall || true; fi
+    done
+    if [ -d "$SRC_DIR" ]; then sudo ldconfig || true; fi
+    rm -rf "$SRC_DIR"
+    return 0
+}
+
+remove_pip_tools() {
+    local tool
+    for tool in "${PIP_TOOLS[@]}"; do
+        if command -v pipx &> /dev/null && pipx list --short 2> /dev/null | grep -q "^$tool "; then
+            pipx uninstall "$tool" || true
+        fi
+        if [ -L "/usr/local/bin/$tool" ]; then sudo rm -f "/usr/local/bin/$tool"; fi
+    done
+    return 0
+}
+
+remove_packages() {
+    local -a candidates=()
+    local pkg had_fx=0
+    case "$FAMILY" in
+        arch)
+            candidates=(swayfx scenefx0.5 waypaper wlogout autotiling swaybg waybar rofi rofi-emoji swaync nwg-displays gsimplecal) ;;
+        debian)
+            candidates=(waybar rofi rofi-emoji sway-notification-center swaync wlogout swaybg gsimplecal) ;;
+        fedora)
+            candidates=(swayfx waybar rofi rofi-wayland rofi-emoji SwayNotificationCenter wlogout swaybg gsimplecal nwg-displays) ;;
+    esac
+
+    if [ "$FAMILY" = "fedora" ] && pkg_installed swayfx; then had_fx=1; fi
+
+    for pkg in "${candidates[@]}"; do
+        if pkg_installed "$pkg"; then
+            pkg_remove "$pkg" || true
+        fi
+    done
+
+    if [ "$FAMILY" != "arch" ]; then
+        remove_source_builds
+        remove_pip_tools
+        rm -rf "$NERD_DIR"
+        if command -v fc-cache &> /dev/null; then fc-cache -f || true; fi
+    fi
+    if (( had_fx )); then
+        sudo dnf -y copr disable swayfx/swayfx || true
+        sudo dnf -y install sway || true
+    fi
+    return 0
+}
+
 do_uninstall() {
     TOTAL=3
 
     rail_top "Uninstall LShell" "$RED"
     rail "${GRAY}This removes LShell configs from ~/.config and its packages.${R}"
+    if [ "$FAMILY" != "arch" ]; then
+        rail "${GRAY}Stock sway is left installed so your session keeps working.${R}"
+    fi
     if ! confirm "Continue?" 1 "╰─"; then
         info "Cancelled."
         exit 0
@@ -638,33 +1086,9 @@ do_uninstall() {
     start_sudo
     echo
 
-    remove_configs() {
-        local items=()
-        if [ -f "$MANIFEST" ]; then
-            mapfile -t items < "$MANIFEST"
-        else
-            items=(sway waybar rofi swaync wlogout waypaper kitty fastfetch autotiling gsimplecal nwg-displays)
-        fi
-        local item
-        for item in "${items[@]}"; do
-            [ -n "$item" ] && rm -rf "$HOME/.config/${item:?}"
-        done
-        rm -rf "$MANIFEST_DIR"
-    }
-
-    remove_packages() {
-        local candidates=(swayfx scenefx0.5 waypaper wlogout autotiling swaybg waybar rofi rofi-emoji swaync nwg-displays gsimplecal)
-        local pkg
-        for pkg in "${candidates[@]}"; do
-            if pacman -Qq "$pkg" &> /dev/null; then
-                sudo pacman -Rns --noconfirm "$pkg" || true
-            fi
-        done
-    }
-
     run "Removing lshell configs" remove_configs
     run "Removing lshell packages" remove_packages
-    run "Cleaning package cache" bash -c 'rm -rf "$HOME/lshell-play" /tmp/lshell-*.tmp'
+    run "Cleaning up" bash -c 'rm -rf "$HOME/lshell-play" "$1" /tmp/lshell-*.tmp' _ "$MANIFEST_DIR"
 
     summary "lshell has been removed"
     ask_reboot
