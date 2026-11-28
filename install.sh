@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # ============================================================
-#  LSHELL INSTALLER  (3D edition · v1.4 · multi-distro)
+#  LSHELL INSTALLER  (3D edition · v1.5 · multi-distro)
 #  Arch / Debian / Fedora (and derivatives) - auto-detected
 #  Override detection:  LSHELL_DISTRO=arch|debian|fedora ./lshell-installer.sh
 # ============================================================
@@ -15,7 +15,7 @@ MANIFEST="$MANIFEST_DIR/manifest"
 SRC_DIR="$MANIFEST_DIR/src"
 NERD_DIR="$HOME/.local/share/fonts/lshell-nerd"
 REPO_URL="https://github.com/deploydy/lshell-play"
-VERSION="1.4"
+VERSION="1.5"
 T0=$SECONDS
 
 export DEBIAN_FRONTEND=noninteractive
@@ -38,6 +38,25 @@ SHADOW=$'\033[38;2;38;36;62m'
 BG_SEL=$'\033[48;2;34;30;66m'
 BG_GREEN=$'\033[48;2;134;239;172m\033[38;2;20;20;30m'
 BG_RED=$'\033[48;2;248;113;113m\033[38;2;20;20;30m'
+
+# ---------- layout: one centered column ----------
+# CW   = width of the content column
+# IND  = left margin that centers the column in the terminal
+# BARW = width of the progress bar (the step line is always CW wide)
+# MW   = inner width of the action menu
+COLS=$(tput cols 2>/dev/null || echo 80)
+if ! [[ "$COLS" =~ ^[0-9]+$ ]]; then COLS=80; fi
+CW=$(( COLS - 4 ))
+if (( CW > 76 )); then CW=76; fi
+if (( CW < 62 )); then CW=62; fi
+INDN=$(( (COLS - CW) / 2 ))
+if (( INDN < 2 )); then INDN=2; fi
+printf -v IND '%*s' "$INDN" ''
+BARW=$(( CW - 54 ))
+MW=$(( CW - 2 ))
+
+# P <printf-args>  ->  printf with the left margin in front
+P() { printf '%s' "$IND"; printf "$@"; }
 
 # ---------- cleanup ----------
 KEEPALIVE_PID=""
@@ -180,10 +199,27 @@ grad_line() {
     local ch="$1" w=$2 i
     LINE=""
     for ((i = 0; i < w; i++)); do
-        grad_rgb "$i" $(( w - 1 ))
+        grad_rgb "$i" $(( w > 1 ? w - 1 : 1 ))
         LINE+=$'\033[38;2;'"$GR;$GG;${GB}m$ch"
     done
     LINE+="$R"
+}
+
+# gtext <text>  ->  prints the text with a per-letter gradient
+gtext() {
+    local s="$1" n=${#1} i out=""
+    for ((i = 0; i < n; i++)); do
+        grad_rgb "$i" $(( n > 1 ? n - 1 : 1 ))
+        out+=$'\033[38;2;'"$GR;$GG;${GB}m${s:i:1}"
+    done
+    printf '%s%s' "$out" "$R"
+}
+
+# cline <visible-length> <text>  ->  one line centered in the column
+cline() {
+    local p=$(( (CW - $1) / 2 ))
+    if (( p < 0 )); then p=0; fi
+    printf '%s%*s%s%s\n' "$IND" "$p" '' "$2" "$R"
 }
 
 # ============================================================
@@ -199,6 +235,7 @@ LOGO_LW=0
 LOGO_CELLS=()
 LOGO_MASK=()
 LCR=(); LCG=(); LCB=()
+LPAD=""
 
 build_logo() {
     local -A G=(
@@ -268,6 +305,8 @@ build_logo() {
             LCR+=("$cr"); LCG+=("$cg"); LCB+=("$cb")
         done
     done
+
+    printf -v LPAD '%*s' $(( (CW - LOGO_W) / 2 )) ''
 }
 
 # print_logo <revealed-width> [sweep-position]
@@ -275,7 +314,7 @@ build_logo() {
 print_logo() {
     local w=$1 s=${2:--100} y x line idx d t cr cg cb cell
     for ((y = 0; y < LOGO_H; y++)); do
-        line="   "
+        line="${IND}${LPAD}"
         for ((x = 0; x < LOGO_W; x++)); do
             if (( x >= w )); then
                 line+=" "
@@ -306,7 +345,7 @@ print_reflection() {
     local -a chr=("▒" "▒" "░")
     for ((k = 0; k < 3; k++)); do
         y=$(( 4 - k ))
-        line="   "
+        line="${IND}${LPAD}"
         for ((x = 0; x < LOGO_W; x++)); do
             if (( x < LOGO_LW )) && [ "${LOGO_MASK[$y]:$((x / 2)):1}" = "X" ]; then
                 grad_rgb "$x" $(( LOGO_W - 1 ))
@@ -324,6 +363,32 @@ print_reflection() {
 # ============================================================
 #  UI HELPERS
 # ============================================================
+
+info() { P '%s●%s %s\n' "$BLUE" "$R" "$1"; }
+ok()   { P '%s✔%s %s\n' "$GREEN" "$R" "$1"; }
+warn() { P '%s▲%s %s\n' "$YELLOW" "$R" "$1"; }
+fail() { P '%s✘%s %s\n' "$RED" "$R" "$1"; }
+
+# rail-style blocks:  ╭─ Title / │  text / ╰─
+RAILC="$PURPLE"
+rail_top()  { RAILC="${2:-$PURPLE}"; printf '\n%s%s╭─%s %s%s%s%s\n' "$IND" "$RAILC" "$R" "$B" "$TEXT" "$1" "$R"; }
+rail()      { printf '%s%s│%s  %s\n' "$IND" "$RAILC" "$R" "$1"; }
+rail_end()  { printf '%s%s╰─%s\n' "$IND" "$RAILC" "$R"; }
+
+# the system card on the welcome screen
+system_card() {
+    local tc="" host="${HOSTNAME:-host}"
+    case "${COLORTERM:-}" in
+        truecolor | 24bit) tc="${TEXT}truecolor${R} ${GREEN}✔${R}" ;;
+        *)                 tc="${YELLOW}▲${R} ${TEXT}no truecolor detected — colors may look off${R}" ;;
+    esac
+    rail_top "System" "$PURPLE"
+    rail "${GRAY}Distro ${R}  ${TEXT}${DISTRO_NAME}${R}"
+    rail "${GRAY}Session${R}  ${TEXT}${USER:-user}@${host}${R}  ${DARK}·${R}  ${TEXT}${FAMILY:-unknown}${R} ${GRAY}family${R}"
+    rail "${GRAY}Display${R}  ${tc}"
+    rail "${GRAY}Log    ${R}  ${TEXT}${LOG}${R}"
+    rail_end
+}
 
 banner() {
     clear
@@ -348,34 +413,32 @@ banner() {
     print_logo "$LOGO_W"
     print_reflection
 
-    local sub="Liquid Shell · installer · v$VERSION"
-    local pad=$(( (LOGO_W - ${#sub}) / 2 ))
-    if (( pad < 0 )); then pad=0; fi
-    printf '   %*s%s%s%s\n' "$pad" '' "$GRAY" "$sub" "$R"
-    grad_line "━" "$LOGO_W"
-    printf '   %s\n' "$LINE"
+    local sub="Liquid Shell · installer · v$VERSION" plain
+    plain="${sub//·/-}"
+    cline "${#plain}" "${GRAY}${sub}"
+    grad_line "━" "$CW"
+    printf '%s%s\n' "$IND" "$LINE"
     echo
-    printf '   %s◆%s %sSway%s %s·%s %sWaybar%s %s·%s %sRofi%s %s·%s %sKitty%s\n' \
-        "$PURPLE" "$R" "$CYAN" "$R" "$DARK" "$R" "$BLUE" "$R" "$DARK" "$R" "$PURPLE" "$R" "$DARK" "$R" "$PINK" "$R"
-    printf '   %s%s%s\n' "$DIM$GRAY" "$REPO_URL" "$R"
-    printf '   %s%s · %s@%s%s\n' "$DIM$GRAY" "$DISTRO_NAME" "${USER:-user}" "${HOSTNAME:-host}" "$R"
+    cline 30 "${PURPLE}◆${R} ${CYAN}Sway${R} ${DARK}·${R} ${BLUE}Waybar${R} ${DARK}·${R} ${PURPLE}Rofi${R} ${DARK}·${R} ${PINK}Kitty${R}"
+    cline "${#REPO_URL}" "${DIM}${GRAY}${REPO_URL}"
+    system_card
     echo
 }
 
-info() { printf '   %s●%s %s\n' "$BLUE" "$R" "$1"; }
-ok()   { printf '   %s✔%s %s\n' "$GREEN" "$R" "$1"; }
-warn() { printf '   %s▲%s %s\n' "$YELLOW" "$R" "$1"; }
-fail() { printf '   %s✘%s %s\n' "$RED" "$R" "$1"; }
-
-# rail-style blocks:  ╭─ Title / │  text / ╰─
-RAILC="$PURPLE"
-rail_top()  { RAILC="${2:-$PURPLE}"; printf '\n   %s╭─%s %s%s%s%s\n' "$RAILC" "$R" "$B" "$TEXT" "$1" "$R"; }
-rail()      { printf '   %s│%s  %s\n' "$RAILC" "$R" "$1"; }
-rail_end()  { printf '   %s╰─%s\n' "$RAILC" "$R"; }
+# compact header shown once an action has been chosen
+mini_header() {
+    local title="$1" rw
+    rw=$(( CW - 10 - ${#title} ))
+    if (( rw < 4 )); then rw=4; fi
+    clear
+    echo
+    grad_line "─" "$rw"
+    printf '%s%s◆%s %s %s %s%s%s%s\n' "$IND" "$PURPLE" "$R" "$(gtext LSHELL)" "$LINE" "$B" "$TEXT" "$title" "$R"
+    echo
+}
 
 # smooth gradient progress bar -> $BAR
 # gbar <units>   (BARW * 8 units = 100%, 1/8-cell resolution)
-BARW=24
 BAR=""
 gbar() {
     local u=$1 full rem i
@@ -396,18 +459,31 @@ gbar() {
     BAR+="$R"
 }
 
+# last meaningful line of the log, cleaned up for the live preview under the spinner
+log_tail() {
+    local w=$(( CW - 6 ))
+    tail -c 600 "$LOG" 2>/dev/null \
+        | tr '\r' '\n' \
+        | sed -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' \
+        | tr -cd '[:print:]\n' \
+        | grep -v '^[[:space:]]*$' \
+        | tail -n1 \
+        | cut -c1-"$w" || true
+}
+
 STEP=0
 TOTAL=0
 SOFT=0
 SOFT_FAILED=0
 
 # run "message" command args...
+# two live lines: spinner + gradient bar, and the tail of the log underneath.
 # the bar creeps forward while a step is running, then snaps to the step end
 # with SOFT=1 (see run_soft) a failing step is reported and skipped instead of aborting
 run() {
     local msg="$1"; shift
     local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
-    local i=0 t0=$SECONDS el pct p sc ease units
+    local i=0 t0=$SECONDS el pct p sc ease units tailtxt="" l1 l2
     STEP=$((STEP + 1))
     SOFT_FAILED=0
 
@@ -425,11 +501,14 @@ run() {
         p=$(( i % 40 )); if [ "$p" -gt 20 ]; then p=$(( 40 - p )); fi
         grad_rgb "$p" 20
         sc=$'\033[38;2;'"$GR;$GG;${GB}m"
-        printf '\r\033[K   %s%s%s %s%d/%d%s  %s%-34s%s %s %s%3d%%%s %s%3ds%s' \
+        if (( i % 6 == 0 )); then tailtxt=$(log_tail); fi
+        printf -v l1 '%s%s%s %s%d/%d%s  %s%-34s%s %s %s%3d%%%s %s%3ds%s' \
             "$sc" "${frames[$((i % 10))]}" "$R" \
             "$GRAY" "$STEP" "$TOTAL" "$R" \
             "$TEXT" "$msg" "$R" \
             "$BAR" "$GRAY" "$pct" "$R" "$DIM$GRAY" "$el" "$R"
+        printf -v l2 '%s↳ %s%s' "$DIM$GRAY" "$tailtxt" "$R"
+        printf '\r\033[K%s%s\n\r\033[K%s  %s\033[A\r' "$IND" "$l1" "$IND" "$l2"
         i=$((i + 1))
         sleep 0.08
     done
@@ -442,16 +521,19 @@ run() {
 
     if (( rc == 0 )); then
         gbar $(( STEP * BARW * 8 / TOTAL ))
-        printf '   %s✔%s %s%d/%d%s  %s%-34s%s %s %s%3d%%%s %s%3ds%s\n' \
+        P '%s✔%s %s%d/%d%s  %s%-34s%s %s %s%3d%%%s %s%3ds%s\n' \
             "$GREEN" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" \
             "$TEXT" "$msg" "$R" \
             "$BAR" "$GRAY" $(( STEP * 100 / TOTAL )) "$R" "$DIM$GRAY" "$el" "$R"
+        printf '\033[K'
     elif (( SOFT )); then
         SOFT_FAILED=1
-        printf '   %s▲%s %s%d/%d%s  %s%-34s%s %s(skipped — see %s)%s\n' \
+        P '%s▲%s %s%d/%d%s  %s%-34s%s %s(skipped — see %s)%s\n' \
             "$YELLOW" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" "$TEXT" "$msg" "$R" "$GRAY" "$LOG" "$R"
+        printf '\033[K'
     else
-        printf '   %s✘%s %s%d/%d%s  %s%s%s\n' "$RED" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" "$TEXT" "$msg" "$R"
+        P '%s✘%s %s%d/%d%s  %s%s%s\n' "$RED" "$R" "$GRAY" "$STEP" "$TOTAL" "$R" "$TEXT" "$msg" "$R"
+        printf '\033[K'
         rail_top "Step failed — last log lines" "$RED"
         tail -n 12 "$LOG" | while IFS= read -r l; do rail "${DIM}${l}${R}"; done
         rail_end
@@ -462,18 +544,30 @@ run() {
 
 run_soft() { SOFT=1; run "$@"; SOFT=0; }
 
-# floating summary card with a drop shadow
+# summary "title" ["note line" ...]
+# floating result card with a drop shadow
 summary() {
-    local t=$((SECONDS - T0)) took sh
+    local title="$1"; shift
+    local t=$((SECONDS - T0)) took sh l inner=$(( CW - 2 )) tw=$(( CW - 6 ))
     took=$(printf '%dm %02ds' $((t / 60)) $((t % 60)))
-    printf -v sh '▒%.0s' $(seq 1 52)
-    grad_line "─" 50
+    printf -v sh '▒%.0s' $(seq 1 "$CW")
+    grad_line "─" "$inner"
     echo
-    printf '   %s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
-    printf '   %s│%s %s✔%s  %s%s%-46s%s%s│%s%s▒%s\n' "$CYAN" "$R" "$GREEN$B" "$R" "$B" "$TEXT" "$1" "$R" "$PINK" "$R" "$SHADOW" "$R"
-    printf '   %s│%s    %s%-46s%s%s│%s%s▒%s\n' "$CYAN" "$R" "$GRAY" "Finished in $took" "$R" "$PINK" "$R" "$SHADOW" "$R"
-    printf '   %s╰%s%s╯%s%s▒%s\n' "$CYAN" "$LINE" "$PINK" "$R" "$SHADOW" "$R"
-    printf '    %s%s%s\n' "$SHADOW" "$sh" "$R"
+    P '%s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
+    P '%s│%s %s✔%s  %s%s%-*s%s%s│%s%s▒%s\n' \
+        "$CYAN" "$R" "$GREEN$B" "$R" "$B" "$TEXT" "$tw" "$title" "$R" "$PINK" "$R" "$SHADOW" "$R"
+    P '%s│%s    %s%-*s%s%s│%s%s▒%s\n' \
+        "$CYAN" "$R" "$GRAY" "$tw" "Finished in $took" "$R" "$PINK" "$R" "$SHADOW" "$R"
+    if (( $# > 0 )); then
+        P '%s│%s    %s%-*s%s%s│%s%s▒%s\n' \
+            "$CYAN" "$R" "$GRAY" "$tw" "" "$R" "$PINK" "$R" "$SHADOW" "$R"
+        for l in "$@"; do
+            P '%s│%s    %s%-*s%s%s│%s%s▒%s\n' \
+                "$CYAN" "$R" "$TEXT" "$tw" "$l" "$R" "$PINK" "$R" "$SHADOW" "$R"
+        done
+    fi
+    P '%s╰%s%s╯%s%s▒%s\n' "$CYAN" "$LINE" "$PINK" "$R" "$SHADOW" "$R"
+    printf '%s %s%s%s\n' "$IND" "$SHADOW" "$sh" "$R"
     echo
 }
 
@@ -488,8 +582,8 @@ confirm() {
         else
             yes="${GRAY}  Yes  ${R}"; no="${RED}▐${BG_RED}${B} No ${R}${RED}▌${R}"
         fi
-        printf '\r\033[K   %s%s%s %s%s%s   %s %s   %s←/→ · y/n · Enter%s' \
-            "$PURPLE" "$lead" "$R" "$B$TEXT" "$q" "$R" "$yes" "$no" "$DIM$GRAY" "$R"
+        printf '\r\033[K%s%s%s%s %s%s%s   %s %s   %s←/→ · y/n · Enter%s' \
+            "$IND" "$PURPLE" "$lead" "$R" "$B$TEXT" "$q" "$R" "$yes" "$no" "$DIM$GRAY" "$R"
         key=""
         IFS= read -rsn1 key || key=""
         case "$key" in
@@ -504,7 +598,7 @@ confirm() {
     tput cnorm 2>/dev/null || true
     local ans="${RED}No${R}"
     [ "$sel" -eq 0 ] && ans="${GREEN}Yes${R}"
-    printf '\r\033[K   %s%s%s %s%s%s  %s%s\n' "$PURPLE" "$lead" "$R" "$TEXT" "$q" "$R" "$B" "$ans$R"
+    printf '\r\033[K%s%s%s%s %s%s%s  %s%s\n' "$IND" "$PURPLE" "$lead" "$R" "$TEXT" "$q" "$R" "$B" "$ans$R"
     return "$sel"
 }
 
@@ -524,31 +618,32 @@ MENU_DESC=("Refresh databases and upgrade all packages" "Install Sway, Waybar, R
 MENU_ICONS=("↻" "✦" "✖" "↩")
 MENU_ACC=("$CYAN" "$PURPLE" "$RED" "$GRAY")
 MENU_CHOICE=0
-MW=56
 
 menu() {
-    local sel=0 key k2 n=${#MENU_ITEMS[@]} i acc ic ti de blank
+    local sel=0 key k2 n=${#MENU_ITEMS[@]} i acc ic ti de blank nw=$(( MW - 5 ))
     printf -v blank '%*s' "$MW" ''
 
     grad_line "─" "$MW"
-    printf '   %s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
+    P '%s╭%s%s╮%s\n' "$CYAN" "$LINE" "$PINK" "$R"
 
     tput civis 2>/dev/null || true
     while true; do
         for i in "${!MENU_ITEMS[@]}"; do
             acc="${MENU_ACC[$i]}"; ic="${MENU_ICONS[$i]}"; ti="${MENU_ITEMS[$i]}"; de="${MENU_DESC[$i]}"
             if [ "$i" -eq "$sel" ]; then
-                printf '\r\033[K   %s│%s%s%s▌%s %s%s  %s%-51s%s%s│%s\n' \
-                    "$CYAN" "$R" "$BG_SEL" "$acc" "$BG_SEL" "$acc$B" "$ic" "$TEXT$B" "$ti" "$R" "$PINK" "$R"
-                printf '\r\033[K   %s│%s%s%s▌%s    %s%-51s%s%s│%s\n' \
-                    "$CYAN" "$R" "$BG_SEL" "$acc" "$BG_SEL" "$GRAY" "$de" "$R" "$PINK" "$R"
+                printf '\r\033[K%s%s│%s%s%s▌%s %s%s  %s%-*s%s[%d] %s%s│%s\n' \
+                    "$IND" "$CYAN" "$R" "$BG_SEL" "$acc" "$BG_SEL" "$acc$B" "$ic" "$TEXT$B" \
+                    $(( nw - 4 )) "$ti" "$acc" $(( i + 1 )) "$R" "$PINK" "$R"
+                printf '\r\033[K%s%s│%s%s%s▌%s    %s%-*s%s%s│%s\n' \
+                    "$IND" "$CYAN" "$R" "$BG_SEL" "$acc" "$BG_SEL" "$GRAY" "$nw" "$de" "$R" "$PINK" "$R"
             else
-                printf '\r\033[K   %s│%s  %s%s  %s%-51s%s%s│%s\n' \
-                    "$CYAN" "$R" "$GRAY" "$ic" "$TEXT" "$ti" "$R" "$PINK" "$R"
-                printf '\r\033[K   %s│%s   %s  %s%-51s%s%s│%s\n' \
-                    "$CYAN" "$R" "$GRAY" "$DIM$GRAY" "$de" "$R" "$PINK" "$R"
+                printf '\r\033[K%s%s│%s  %s%s  %s%-*s%s[%d] %s%s│%s\n' \
+                    "$IND" "$CYAN" "$R" "$GRAY" "$ic" "$TEXT" \
+                    $(( nw - 4 )) "$ti" "$DIM$GRAY" $(( i + 1 )) "$R" "$PINK" "$R"
+                printf '\r\033[K%s%s│%s   %s  %s%-*s%s%s│%s\n' \
+                    "$IND" "$CYAN" "$R" "$GRAY" "$DIM$GRAY" "$nw" "$de" "$R" "$PINK" "$R"
             fi
-            printf '\r\033[K   %s│%s%s%s│%s\n' "$CYAN" "$R" "$blank" "$PINK" "$R"
+            printf '\r\033[K%s%s│%s%s%s│%s\n' "$IND" "$CYAN" "$R" "$blank" "$PINK" "$R"
         done
         key=""
         IFS= read -rsn1 key || key=""
@@ -572,52 +667,9 @@ menu() {
     tput cnorm 2>/dev/null || true
 
     grad_line "─" "$MW"
-    printf '   %s╰%s%s╯%s\n' "$CYAN" "$LINE" "$PINK" "$R"
+    P '%s╰%s%s╯%s\n' "$CYAN" "$LINE" "$PINK" "$R"
     MENU_CHOICE=$sel
 }
-
-# ============================================================
-#  CHECKS
-# ============================================================
-
-detect_distro
-
-if [ "$EUID" -eq 0 ]; then
-    banner; fail "Do not run this script as root!"; exit 1
-fi
-case "$FAMILY" in
-    arch)
-        if ! command -v pacman &> /dev/null; then
-            banner; fail "pacman not found."; exit 1
-        fi
-        if ! command -v yay &> /dev/null; then
-            banner; fail "yay is not installed."; exit 1
-        fi
-        ;;
-    debian)
-        if ! command -v apt-get &> /dev/null; then
-            banner; fail "apt-get not found."; exit 1
-        fi
-        ;;
-    fedora)
-        if ! command -v dnf &> /dev/null; then
-            banner; fail "dnf not found."; exit 1
-        fi
-        ;;
-    *)
-        banner; fail "Unsupported distribution: $DISTRO_NAME"
-        info "Supported: Arch, Debian/Ubuntu, Fedora (and derivatives)"
-        info "Force a family with: LSHELL_DISTRO=arch|debian|fedora"
-        exit 1
-        ;;
-esac
-if ! command -v sudo &> /dev/null; then
-    banner; fail "sudo is not installed."; exit 1
-fi
-
-: > "$LOG"
-: > "$MISSING_FILE"
-rm -f "$FXFAIL_FILE"
 
 start_sudo() {
     sudo -v
@@ -926,13 +978,15 @@ install_configs() {
 do_update() {
     TOTAL=2
     start_sudo
-    echo
+    mini_header "System update"
 
     run "Refreshing package databases" pkg_refresh
     resolve_conflicts -Su
     run "Upgrading packages" pkg_upgrade
 
-    summary "Update completed"
+    summary "Update completed" \
+        "All packages are up to date" \
+        "Log: $LOG"
     ask_reboot
 }
 
@@ -973,7 +1027,7 @@ do_install() {
     TOTAL=9
     start_sudo
     BUILD_DIR=$(mktemp -d)
-    echo
+    mini_header "Full installation"
 
     choose_swayfx
 
@@ -995,7 +1049,9 @@ do_install() {
     run "Removing old waybar config" rm -rf "$HOME/.config/waybar/config.jsonc"
     run "Installing lshell configs" install_configs
 
-    summary "Installation completed successfully"
+    summary "Installation completed successfully" \
+        "Next: reboot, then choose Sway at your login screen" \
+        "Log: $LOG"
     ask_reboot
 }
 
@@ -1073,6 +1129,7 @@ remove_packages() {
 do_uninstall() {
     TOTAL=3
 
+    mini_header "Uninstall"
     rail_top "Uninstall LShell" "$RED"
     rail "${GRAY}This removes LShell configs from ~/.config and its packages.${R}"
     if [ "$FAMILY" != "arch" ]; then
@@ -1090,21 +1147,72 @@ do_uninstall() {
     run "Removing lshell packages" remove_packages
     run "Cleaning up" bash -c 'rm -rf "$HOME/lshell-play" "$1" /tmp/lshell-*.tmp' _ "$MANIFEST_DIR"
 
-    summary "lshell has been removed"
+    summary "lshell has been removed" \
+        "Configs and packages are gone" \
+        "Log: $LOG"
     ask_reboot
 }
 
 # ============================================================
-#  MAIN
+#  CHECKS + MAIN
 # ============================================================
 
-ANIM=1 banner
-printf '   %s%sSelect an action%s   %s↑/↓ or 1-4 · Enter to confirm%s\n\n' "$B" "$TEXT" "$R" "$DIM$GRAY" "$R"
-menu
+preflight() {
+    detect_distro
 
-case "$MENU_CHOICE" in
-    0) do_update ;;
-    1) do_install ;;
-    2) do_uninstall ;;
-    3) info "Exiting."; exit 0 ;;
-esac
+    if [ "$EUID" -eq 0 ]; then
+        banner; fail "Do not run this script as root!"; exit 1
+    fi
+    case "$FAMILY" in
+        arch)
+            if ! command -v pacman &> /dev/null; then
+                banner; fail "pacman not found."; exit 1
+            fi
+            if ! command -v yay &> /dev/null; then
+                banner; fail "yay is not installed."; exit 1
+            fi
+            ;;
+        debian)
+            if ! command -v apt-get &> /dev/null; then
+                banner; fail "apt-get not found."; exit 1
+            fi
+            ;;
+        fedora)
+            if ! command -v dnf &> /dev/null; then
+                banner; fail "dnf not found."; exit 1
+            fi
+            ;;
+        *)
+            banner; fail "Unsupported distribution: $DISTRO_NAME"
+            info "Supported: Arch, Debian/Ubuntu, Fedora (and derivatives)"
+            info "Force a family with: LSHELL_DISTRO=arch|debian|fedora"
+            exit 1
+            ;;
+    esac
+    if ! command -v sudo &> /dev/null; then
+        banner; fail "sudo is not installed."; exit 1
+    fi
+
+    : > "$LOG"
+    : > "$MISSING_FILE"
+    rm -f "$FXFAIL_FILE"
+}
+
+main() {
+    preflight
+
+    ANIM=1 banner
+    P '%s%sSelect an action%s   %s↑/↓ or 1-4 · Enter to confirm%s\n\n' "$B" "$TEXT" "$R" "$DIM$GRAY" "$R"
+    menu
+
+    case "$MENU_CHOICE" in
+        0) do_update ;;
+        1) do_install ;;
+        2) do_uninstall ;;
+        3) info "Exiting."; exit 0 ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
