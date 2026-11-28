@@ -9,6 +9,8 @@ Usage:
     python3 lshell.py --tz Europe/Kyiv         # set the clock timezone, no interface
     python3 lshell.py --kbd on|off|toggle
     python3 lshell.py --kbd-up F6 --kbd-down F5
+    python3 lshell.py --blur on|off|toggle     # swayfx blur behind the Waybar panel
+    python3 lshell.py --tint 0.35              # panel background opacity (Waybar only)
     python3 lshell.py -c ~/my/config           # use another config
     python3 lshell.py --no-splash              # skip the splash screen
     python3 lshell.py --no-restart             # only edit the config
@@ -220,6 +222,10 @@ DEFAULT_UP = "XF86KbdBrightnessUp"
 DEFAULT_DOWN = "XF86KbdBrightnessDown"
 KEY_PRESETS = ("XF86KbdBrightnessUp", "XF86KbdBrightnessDown", "$mod+bracketright", "$mod+bracketleft",
                "$mod+F6", "$mod+F5", "F6", "F5")
+BLUR_LINE = 'layer_effects "waybar" blur enable; shadows disable'
+BLUR_RE = re.compile(r'^\s*layer_effects\s+"waybar"\s+blur\s+enable\b')
+TINT_RE = re.compile(r"(window#waybar\s*\{[^}]*?background-color:\s*rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*)([0-9.]+)(\s*\))", re.S)
+TINT_MIN, TINT_MAX, TINT_STEP = 0.05, 0.90, 0.05
 KEY_RE = re.compile(r"^[A-Za-z0-9_$+\-]+$")
 BIND_RE = re.compile(r"^\s*bindsym\s+(?:--\S+\s+)*(\S+)")
 OWN_RE = re.compile(r"^\s*bindsym\s+(\S+)\s+exec\s+brightnessctl\s+-d\s+'" + re.escape(KBD_DEVICE)
@@ -442,6 +448,105 @@ def run_kbd_cli(sway: Path | None, args) -> int:
     return 0 if done else 1
 
 
+def read_blur(path: Path) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return "on" if any(BLUR_RE.match(l) for l in lines) else "off"
+
+
+def read_blur_safe(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return read_blur(path)
+    except OSError:
+        return None
+
+
+def write_blur(path: Path, enable: bool) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines = [l for l in lines if not BLUR_RE.match(l)]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    if enable:
+        lines += ["\n", BLUR_LINE + "\n"]
+    backup(path)
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def apply_blur(sway: Path | None, mode: str) -> tuple[bool, str, bool]:
+    if sway is None:
+        return False, "Could not find the sway config. Pass a path: --sway-config /path/to/config", False
+    try:
+        state = read_blur(sway)
+    except OSError as e:
+        return False, f"Could not read the config: {e}", False
+    want = (state != "on") if mode == "toggle" else mode == "on"
+    word = "on" if want else "off"
+    if want == (state == "on"):
+        return True, f"Panel blur is already {word}", False
+    try:
+        write_blur(sway, want)
+    except OSError as e:
+        return False, f"Could not write the config: {e}", False
+    return True, f"Panel blur is now {word}", True
+
+
+def run_blur_cli(sway: Path | None, args) -> int:
+    ok, note, changed = apply_blur(sway, args.blur)
+    if not ok:
+        print(note, file=sys.stderr)
+        return 1
+    notes = [note]
+    done = True
+    if changed and not args.no_restart:
+        done, text = reload_sway()
+        notes.append(text)
+    print(" · ".join(notes))
+    return 0 if done else 1
+
+
+def style_path(cfg: Path) -> Path:
+    return cfg.with_name("style.css")
+
+
+def read_tint(cfg: Path) -> float | None:
+    """Alpha of the panel background in style.css (window#waybar)."""
+    style = style_path(cfg)
+    if not style.is_file():
+        return None
+    m = TINT_RE.search(style.read_text(encoding="utf-8"))
+    return float(m.group(2)) if m else None
+
+
+def read_tint_safe(cfg: Path) -> float | None:
+    try:
+        return read_tint(cfg)
+    except (OSError, ValueError):
+        return None
+
+
+def apply_tint(cfg: Path, alpha: float) -> tuple[bool, str, bool]:
+    if not TINT_MIN - 1e-9 <= alpha <= TINT_MAX + 1e-9:
+        return False, f"Panel opacity must be between {TINT_MIN:.2f} and {TINT_MAX:.2f}", False
+    style = style_path(cfg)
+    if not style.is_file():
+        return False, f"Could not find {style}", False
+    try:
+        text = style.read_text(encoding="utf-8")
+        m = TINT_RE.search(text)
+        if not m:
+            return False, "No rgba() background-color found in window#waybar in style.css", False
+        if abs(float(m.group(2)) - alpha) < 1e-9:
+            return True, f"Panel opacity is already {alpha:.2f}", False
+        backup(style)
+        style.write_text(text[:m.start(2)] + f"{alpha:.2f}" + text[m.end(2):], encoding="utf-8")
+    except (OSError, ValueError) as e:
+        return False, f"Could not write style.css: {e}", False
+    return True, f"Panel opacity is now {alpha:.2f}", True
+
+
 def suggest_keys(text: str, limit: int = 6) -> list[str]:
     t = text.strip().lower()
     return [k for k in KEY_PRESETS if t in k.lower()][:limit]
@@ -598,6 +703,18 @@ def build_main(state: dict) -> list[str]:
     if kbd is not None:
         lines.append(f"{fg(GRAY)}up{RESET} {fg(CYAN)}{state['up_key']}{RESET}   {fg(GRAY)}down{RESET} {fg(CYAN)}{state['down_key']}{RESET}")
 
+    blur = state.get("blur")
+    if blur == "on":
+        blur_text = f"{fg(GREEN)}on{RESET}"
+    elif blur == "off":
+        blur_text = f"{fg(GRAY)}off{RESET}"
+    else:
+        blur_text = f"{fg(GRAY)}sway config not found{RESET}"
+    lines += [f"{BOLD}Panel blur{RESET}  {blur_text}"]
+    tint = state.get("tint")
+    tint_text = f"{fg(CYAN)}{tint:.2f}{RESET} {fg(GRAY)}(lower = more blur shows through){RESET}" if tint is not None \
+        else f"{fg(GRAY)}no rgba() background in style.css{RESET}"
+    lines += [f"{BOLD}Panel opacity{RESET}  {tint_text}"]
     kind, text = state["msg"]
     colour = {"ok": GREEN, "err": RED, "info": GRAY}[kind]
     lines += ["", f"{fg(colour)}{text}{RESET}" if text else "", ""]
@@ -607,7 +724,9 @@ def build_main(state: dict) -> list[str]:
                  f"{key_hint('Q')} {fg(GRAY)}quit{RESET}")
     lines.append(f"{key_hint('I')} {fg(GRAY)}backlight on/off{RESET}   "
                  f"{key_hint('U')} {fg(GRAY)}increase key{RESET}   "
-                 f"{key_hint('D')} {fg(GRAY)}decrease key{RESET}")
+                 f"{key_hint('D')} {fg(GRAY)}decrease key{RESET}   "
+                 f"{key_hint('G')} {fg(GRAY)}blur on/off{RESET}   "
+                 f"{key_hint('[')}{fg(GRAY)}/{RESET}{key_hint(']')} {fg(GRAY)}panel opacity{RESET}")
     return lines
 
 
@@ -708,13 +827,15 @@ def splash(steps) -> None:
 
 
 def run_ui(cfg: Path, sway: Path | None, args) -> int:
-    info: dict = {"active": None, "tz": None, "kbd": (None, DEFAULT_UP, DEFAULT_DOWN)}
+    info: dict = {"active": None, "tz": None, "kbd": (None, DEFAULT_UP, DEFAULT_DOWN), "blur": None, "tint": None}
 
     def read():
         info["active"] = read_position(cfg)
         zones = read_timezones(cfg)
         info["tz"] = zones[0] if zones else None
         info["kbd"] = read_kbd_safe(sway)
+        info["blur"] = read_blur_safe(sway)
+        info["tint"] = read_tint_safe(cfg)
 
     steps = [
         ("Looking for the Waybar config…", lambda: time.sleep(0.12)),
@@ -739,6 +860,8 @@ def run_ui(cfg: Path, sway: Path | None, args) -> int:
             "kbd": info["kbd"][0],
             "up_key": info["kbd"][1],
             "down_key": info["kbd"][2],
+            "blur": info["blur"],
+            "tint": info["tint"],
             "key_target": "up",
             "path": cfg,
             "buf": "",
@@ -781,6 +904,41 @@ def run_ui(cfg: Path, sway: Path | None, args) -> int:
                 redraw()
                 done, text = reload_sway()
                 state["msg"] = ("ok", f"✓ {note} · {text}") if done else ("err", f"✗ {text}")
+
+        def blur_apply(mode):
+            ok, note, changed = apply_blur(sway, mode)
+            if not ok:
+                state["msg"] = ("err", f"✗ {note}")
+                return
+            state["blur"] = read_blur_safe(sway)
+            if not changed:
+                state["msg"] = ("info", note)
+            elif args.no_restart:
+                state["msg"] = ("ok", f"✓ {note} (reload sway to apply)")
+            else:
+                state["msg"] = ("info", "Applying…")
+                redraw()
+                done, text = reload_sway()
+                state["msg"] = ("ok", f"✓ {note} · {text}") if done else ("err", f"✗ {text}")
+
+        def tint_adjust(k):
+            cur = state["tint"]
+            if cur is None:
+                state["msg"] = ("err", "✗ No rgba() background-color found in window#waybar in style.css")
+                return
+            new = round(cur + (TINT_STEP if k == "]" else -TINT_STEP), 2)
+            if not TINT_MIN - 1e-9 <= new <= TINT_MAX + 1e-9:
+                state["msg"] = ("info", f"Panel opacity is already at the {'maximum' if k == ']' else 'minimum'}")
+                return
+            ok, note, changed = apply_tint(cfg, new)
+            if not ok:
+                state["msg"] = ("err", f"✗ {note}")
+                return
+            state["tint"] = read_tint_safe(cfg)
+            if changed:
+                finish(note)
+            else:
+                state["msg"] = ("info", note)
 
         def set_key(target, chosen):
             up = chosen if target == "up" else state["up_key"]
@@ -892,6 +1050,12 @@ def run_ui(cfg: Path, sway: Path | None, args) -> int:
             elif k == "i":
                 dirty = True
                 kbd_apply("toggle", state["up_key"], state["down_key"])
+            elif k == "g":
+                dirty = True
+                blur_apply("toggle")
+            elif k in ("]", "["):
+                dirty = True
+                tint_adjust(k)
             elif k in ("u", "d"):
                 dirty = True
                 if state["kbd"] is None:
@@ -963,6 +1127,14 @@ def run_cli(cfg: Path, args) -> int:
             changed = True
             notes.append(f"Panel is now at the {NAMES[pos].lower()}")
 
+    if args.tint is not None:
+        ok_t, note, ch = apply_tint(cfg, round(args.tint, 2))
+        if not ok_t:
+            print(note, file=sys.stderr)
+            return 1
+        changed = changed or ch
+        notes.append(note)
+
     ok = True
     if changed and not args.no_restart:
         ok, text = restart_waybar(cfg, bool(args.config))
@@ -982,6 +1154,10 @@ def main() -> int:
                     help="add or remove the keyboard backlight binds (brightnessctl) in the sway config")
     ap.add_argument("--kbd-up", metavar="KEY", help="key that raises the keyboard backlight, e.g. F6 or $mod+F6")
     ap.add_argument("--kbd-down", metavar="KEY", help="key that lowers the keyboard backlight, e.g. F5 or $mod+F5")
+    ap.add_argument("--blur", choices=["on", "off", "toggle"],
+                    help="turn the swayfx blur behind the Waybar panel on or off (layer_effects in the sway config)")
+    ap.add_argument("--tint", type=float, metavar="ALPHA",
+                    help="panel background opacity, 0.05-0.90 (lower = more of the blurred background shows through)")
     ap.add_argument("--sway-config", help="path to the sway config (default: ~/.config/sway/config)")
     ap.add_argument("--no-splash", action="store_true", help="skip the splash screen")
     ap.add_argument("--no-restart", action="store_true", help="do not restart waybar after changes")
@@ -991,7 +1167,12 @@ def main() -> int:
 
     if args.kbd or args.kbd_up or args.kbd_down:
         code = run_kbd_cli(sway, args)
-        if code != 0 or not (args.position or args.tz):
+        if code != 0 or not (args.position or args.tz or args.blur or args.tint is not None):
+            return code
+
+    if args.blur:
+        code = run_blur_cli(sway, args)
+        if code != 0 or not (args.position or args.tz or args.tint is not None):
             return code
 
     cfg = find_config(args.config)
@@ -999,7 +1180,7 @@ def main() -> int:
         print("Could not find the waybar config. Pass a path: lshell.py -c /path/to/config", file=sys.stderr)
         return 1
 
-    if args.position or args.tz:
+    if args.position or args.tz or args.tint is not None:
         return run_cli(cfg, args)
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
