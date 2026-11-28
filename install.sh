@@ -1024,7 +1024,7 @@ install_stack_fedora() {
 }
 
 do_install() {
-    TOTAL=9
+    TOTAL=10
     start_sudo
     BUILD_DIR=$(mktemp -d)
     mini_header "Full installation"
@@ -1047,6 +1047,7 @@ do_install() {
         run_soft "Generating fastfetch config" fastfetch --gen-config
     fi
     run "Removing old waybar config" rm -rf "$HOME/.config/waybar/config.jsonc"
+    run "Removing old fastfetch config" rm -f "$HOME/.config/fastfetch/config.jsonc"
     run "Installing lshell configs" install_configs
 
     summary "Installation completed successfully" \
